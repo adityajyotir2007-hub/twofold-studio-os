@@ -1,0 +1,19 @@
+TWOFOLD STUDIO LLC — MASTER SERVICES AGREEMENT (MSA)
+Client: Vanguard Ledger Partners (New York, NY)
+Project: Vanguard Enterprise Web & Design System
+Effective Date: September 8, 2026
+Contract Value: $48,000 USD
+
+1. SCOPE OF SERVICES
+Twofold Studio will architect, design, and build the Vanguard Ledger institutional web application, tokenized Figma design system, and interactive treasury yield calculator on Next.js 15.
+
+2. PAYMENT SCHEDULE
+- Milestone 1 (50% Deposit): $24,000 USD — Paid September 12, 2026
+- Milestone 2 (50% Staging Delivery): $24,000 USD — Paid November 4, 2026
+
+3. INTELLECTUAL PROPERTY
+Full title and IP rights transfer to Vanguard Ledger Partners upon settlement.
+
+Signed:
+David Vance-Houghton, Managing Partner — Vanguard Ledger Partners
+Elena Vance, Founder & Executive Director — Twofold Studio

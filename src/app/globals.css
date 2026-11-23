@@ -1,0 +1,40 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
+html,
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(115, 115, 115, 0.35) transparent;
+}
+
+/* Recharts text in dark mode */
+.dark .recharts-cartesian-axis-tick-value {
+  fill: #a3a3a3;
+}
+.dark .recharts-cartesian-grid line {
+  stroke: #262626;
+}
+.dark .recharts-default-tooltip {
+  background-color: #171717 !important;
+  border-color: #262626 !important;
+}

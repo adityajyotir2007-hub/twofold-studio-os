@@ -1,0 +1,16 @@
+{
+  "brand": "Veridian Climate Labs",
+  "version": "2.1.0",
+  "typography": {
+    "heading": "Inter Display SemiBold",
+    "body": "Inter Regular",
+    "mono": "JetBrains Mono"
+  },
+  "colors": {
+    "backgroundPrimary": "#FAFAFA",
+    "surfaceCard": "#FFFFFF",
+    "charcoalPrimary": "#141619",
+    "accentEmerald": "#059669",
+    "borderSubtle": "#E9ECEF"
+  }
+}

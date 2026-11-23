@@ -1,0 +1,100 @@
+{
+  "migratedAt": "2026-11-21T05:03:12.700Z",
+  "workspaceUuid": "90f4b6ac-6f9c-4f7a-a495-3944245393f3",
+  "backupFile": "C:\\Users\\JYOTIRADITYA\\Downloads\\studios\\data\\backups\\agency-db-backup-2026-11-21T05-03-12-678Z.json",
+  "sqlMigrationSeedFile": "C:\\Users\\JYOTIRADITYA\\Downloads\\studios\\supabase\\migrations\\20261120000003_migrated_data.sql",
+  "tables": {
+    "teamMembers": {
+      "total": 5,
+      "realRecords": 5,
+      "demoRecords": 0
+    },
+    "leads": {
+      "total": 6,
+      "realRecords": 0,
+      "demoRecords": 6
+    },
+    "outreach": {
+      "total": 6,
+      "realRecords": 0,
+      "demoRecords": 6
+    },
+    "coldCalls": {
+      "total": 3,
+      "realRecords": 0,
+      "demoRecords": 3
+    },
+    "campaigns": {
+      "total": 2,
+      "realRecords": 0,
+      "demoRecords": 2
+    },
+    "clients": {
+      "total": 4,
+      "realRecords": 0,
+      "demoRecords": 4
+    },
+    "projects": {
+      "total": 4,
+      "realRecords": 0,
+      "demoRecords": 4
+    },
+    "tasks": {
+      "total": 6,
+      "realRecords": 0,
+      "demoRecords": 6
+    },
+    "finance": {
+      "total": 8,
+      "realRecords": 0,
+      "demoRecords": 8
+    },
+    "documents": {
+      "total": 5,
+      "realRecords": 0,
+      "demoRecords": 5
+    },
+    "templates": {
+      "total": 9,
+      "realRecords": 9,
+      "demoRecords": 0
+    }
+  },
+  "foreignKeyValidation": {
+    "validatedRelationships": 32,
+    "warnings": [],
+    "status": "ALL_VALID"
+  },
+  "preservedDocuments": [
+    {
+      "docId": "doc-1",
+      "storagePath": "agreements/vanguard-ledger-msa-2026.txt",
+      "existsOnDisk": true,
+      "bytes": 832
+    },
+    {
+      "docId": "doc-2",
+      "storagePath": "proposals/aether-precision-proposal-v2.md",
+      "existsOnDisk": true,
+      "bytes": 699
+    },
+    {
+      "docId": "doc-3",
+      "storagePath": "brand-guidelines/veridian-design-tokens.json",
+      "existsOnDisk": true,
+      "bytes": 363
+    },
+    {
+      "docId": "doc-4",
+      "storagePath": "onboarding/twofold-client-onboarding-form.md",
+      "existsOnDisk": true,
+      "bytes": 534
+    },
+    {
+      "docId": "doc-5",
+      "storagePath": "deliverables/lumina-handover-runbook.md",
+      "existsOnDisk": true,
+      "bytes": 457
+    }
+  ]
+}
