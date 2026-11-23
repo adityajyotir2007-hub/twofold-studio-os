@@ -55,7 +55,7 @@ export function AuthScreen() {
   const [customGoogleEmail, setCustomGoogleEmail] = useState("");
   const [customGoogleName, setCustomGoogleName] = useState("");
   const [customGoogleTitle, setCustomGoogleTitle] = useState("CEO");
-  const [email, setEmail] = useState("elena@twofold.studio");
+  const [email, setEmail] = useState("jyotiraditya@twofold.studio");
   const [password, setPassword] = useState("Twofold2026!");
   const [inviteToken, setInviteToken] = useState("");
   const [invitePhone, setInvitePhone] = useState("");
@@ -302,23 +302,23 @@ export function AuthScreen() {
                   disabled={loading}
                   onClick={() =>
                     handleGoogleLoginQuick({
-                      name: "Chief Executive Officer",
-                      email: "ceo@twofold.studio",
-                      title: "CEO & Executive Director",
+                      name: "Rajdhar Diwedi",
+                      email: "rajdhar@twofold.studio",
+                      title: "Chief Executive Officer (CEO)",
                     })
                   }
                   className="w-full flex items-center justify-between p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 hover:border-neutral-900 dark:hover:border-white hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition text-left shadow-2xs group"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs">
-                      CEO
+                      RD
                     </div>
                     <div>
                       <div className="text-xs font-semibold group-hover:text-neutral-900 dark:group-hover:text-white">
-                        Sign in as CEO
+                        Sign in as Rajdhar Diwedi (CEO)
                       </div>
                       <div className="text-[11px] text-neutral-400">
-                        ceo@twofold.studio · Full Admin Rights
+                        rajdhar@twofold.studio · Full Admin Rights
                       </div>
                     </div>
                   </div>
@@ -330,23 +330,23 @@ export function AuthScreen() {
                   disabled={loading}
                   onClick={() =>
                     handleGoogleLoginQuick({
-                      name: "Studio Co-Founder",
-                      email: "cofounder@twofold.studio",
-                      title: "Co-Founder & Head of Product",
+                      name: "Jyotiraditya",
+                      email: "jyotiraditya@twofold.studio",
+                      title: "Co-Founder & Executive Director",
                     })
                   }
                   className="w-full flex items-center justify-between p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 hover:border-neutral-900 dark:hover:border-white hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition text-left shadow-2xs group"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
-                      CF
+                      JD
                     </div>
                     <div>
                       <div className="text-xs font-semibold group-hover:text-neutral-900 dark:group-hover:text-white">
-                        Sign in as Co-Founder
+                        Sign in as Jyotiraditya (Co-Founder)
                       </div>
                       <div className="text-[11px] text-neutral-400">
-                        cofounder@twofold.studio · Full Admin Rights
+                        jyotiraditya@twofold.studio · Full Admin Rights
                       </div>
                     </div>
                   </div>

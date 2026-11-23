@@ -213,7 +213,7 @@ export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
   const actor = session
     ? { id: session.member.id, name: session.member.name, role: session.role }
-    : { id: "tm-1", name: "Elena Vance", role: "Admin" as const };
+    : { id: "tm-1", name: "Rajdhar Diwedi", role: "Admin" as const };
 
   try {
     const body = await req.json();

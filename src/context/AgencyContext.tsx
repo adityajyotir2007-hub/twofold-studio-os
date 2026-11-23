@@ -440,9 +440,17 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
     async (email: string, password: string) => {
       const cleanEmail = email.trim().toLowerCase();
       const fallbackMember =
-        db.teamMembers.find((m) => m.email.toLowerCase() === cleanEmail) ||
+        db.teamMembers.find(
+          (m) =>
+            m.email.toLowerCase() === cleanEmail ||
+            m.name.toLowerCase() === cleanEmail ||
+            cleanEmail.includes(m.name.toLowerCase().split(" ")[0])
+        ) ||
         INITIAL_AGENCY_DATA.teamMembers.find(
-          (m) => m.email.toLowerCase() === cleanEmail
+          (m) =>
+            m.email.toLowerCase() === cleanEmail ||
+            m.name.toLowerCase() === cleanEmail ||
+            cleanEmail.includes(m.name.toLowerCase().split(" ")[0])
         );
       const isDefaultPwd =
         password.toLowerCase() === "twofold2026!" ||

@@ -158,7 +158,11 @@ export function authenticateEmailPassword(
   try {
     const db = readAgencyDb();
     const member = (db.teamMembers || []).find(
-      (m) => m.email.toLowerCase() === cleanEmail
+      (m) =>
+        m.email.toLowerCase() === cleanEmail ||
+        m.name.toLowerCase() === cleanEmail ||
+        m.name.toLowerCase().includes(cleanEmail) ||
+        cleanEmail.includes(m.name.toLowerCase().split(" ")[0])
     );
     if (!member) {
       return { ok: false, error: "Invalid email or password." };

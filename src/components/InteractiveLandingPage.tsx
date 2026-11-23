@@ -301,12 +301,12 @@ export function InteractiveLandingPage({
 
             <button
               type="button"
-              onClick={() => handleInstantRoleLaunch("elena@twofold.studio")}
+              onClick={() => handleInstantRoleLaunch("rajdhar@twofold.studio")}
               disabled={Boolean(quickLoginLoading)}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:opacity-90 transition shadow-sm disabled:opacity-50"
             >
               <Zap className="w-3.5 h-3.5" />
-              {quickLoginLoading === "elena@twofold.studio"
+              {quickLoginLoading === "rajdhar@twofold.studio"
                 ? "Launching OS..."
                 : "Launch Live Workspace"}
               <ArrowRight className="w-3.5 h-3.5" />
@@ -353,38 +353,26 @@ export function InteractiveLandingPage({
 
             <button
               type="button"
-              onClick={() => handleInstantRoleLaunch("elena@twofold.studio")}
+              onClick={() => handleInstantRoleLaunch("rajdhar@twofold.studio")}
               disabled={Boolean(quickLoginLoading)}
               className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-medium bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:opacity-95 transition shadow-md disabled:opacity-50"
             >
               <Play className="w-4 h-4 fill-current" />
-              {quickLoginLoading === "elena@twofold.studio"
-                ? "Entering Admin Workspace..."
-                : "Enter Workspace as Admin (Elena Vance)"}
+              {quickLoginLoading === "rajdhar@twofold.studio"
+                ? "Entering as CEO..."
+                : "Enter Workspace as CEO (Rajdhar Diwedi)"}
             </button>
 
             <button
               type="button"
-              onClick={() => handleInstantRoleLaunch("marcus@twofold.studio")}
+              onClick={() => handleInstantRoleLaunch("jyotiraditya@twofold.studio")}
               disabled={Boolean(quickLoginLoading)}
-              className="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition"
-            >
-              <Users className="w-4 h-4 text-blue-500" />
-              {quickLoginLoading === "marcus@twofold.studio"
-                ? "Entering..."
-                : "Demo as Manager"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleInstantRoleLaunch("sora@twofold.studio")}
-              disabled={Boolean(quickLoginLoading)}
-              className="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-medium bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition shadow-2xs disabled:opacity-50"
             >
               <ShieldCheck className="w-4 h-4 text-emerald-500" />
-              {quickLoginLoading === "sora@twofold.studio"
-                ? "Entering..."
-                : "Demo as Team Member (RBAC)"}
+              {quickLoginLoading === "jyotiraditya@twofold.studio"
+                ? "Entering as Co-Founder..."
+                : "Enter Workspace as Co-Founder (Jyotiraditya)"}
             </button>
 
             <button

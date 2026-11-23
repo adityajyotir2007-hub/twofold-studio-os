@@ -197,7 +197,7 @@ export async function DELETE(req: NextRequest) {
       const session = getSessionFromRequest(req);
       const actor = session
         ? { id: session.member.id, name: session.member.name, role: session.role }
-        : { id: "tm-1", name: "Elena Vance", role: "Admin" as const };
+        : { id: "tm-1", name: "Rajdhar Diwedi", role: "Admin" as const };
 
       if (!canMemberDeleteRecords(actor.role)) {
         return NextResponse.json(
@@ -259,7 +259,7 @@ export async function PATCH(req: NextRequest) {
   const session = getSessionFromRequest(req);
   const actor = session
     ? { id: session.member.id, name: session.member.name, role: session.role }
-    : { id: "tm-1", name: "Elena Vance", role: "Admin" as const };
+    : { id: "tm-1", name: "Rajdhar Diwedi", role: "Admin" as const };
 
   if (
     (collection === "finance" || collection === "payments") &&
@@ -328,7 +328,7 @@ export async function POST(req: NextRequest) {
     const session = getSessionFromRequest(req);
     const actor = session
       ? { id: session.member.id, name: session.member.name, role: session.role }
-      : { id: "tm-1", name: "Elena Vance", role: "Admin" as const };
+      : { id: "tm-1", name: "Rajdhar Diwedi", role: "Admin" as const };
 
     if (
       (collection === "finance" || collection === "payments") &&
@@ -377,7 +377,7 @@ export async function POST(req: NextRequest) {
   const session = getSessionFromRequest(req);
   const actor = session
     ? { id: session.member.id, name: session.member.name, role: session.role }
-    : { id: "tm-1", name: "Elena Vance", role: "Admin" as const };
+    : { id: "tm-1", name: "Rajdhar Diwedi", role: "Admin" as const };
 
   try {
     const contentType = req.headers.get("content-type") || "";
