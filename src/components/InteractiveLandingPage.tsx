@@ -646,38 +646,50 @@ export function InteractiveLandingPage({
                   <div className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
                     Click any lead to inspect their Unified Timeline
                   </div>
-                  {sampleLeads.map((lead, idx) => (
-                    <button
-                      key={lead.id}
-                      type="button"
-                      onClick={() => setPreviewLeadIdx(idx)}
-                      className={`w-full text-left p-3.5 rounded-2xl border transition flex items-center justify-between ${
-                        idx === previewLeadIdx
-                          ? "border-neutral-900 dark:border-white bg-neutral-50 dark:bg-neutral-800/60 shadow-2xs"
-                          : "border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/30"
-                      }`}
-                    >
-                      <div>
-                        <div className="text-sm font-semibold flex items-center gap-2">
-                          <span>{lead.businessName}</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-200/70 dark:bg-neutral-700 font-medium">
-                            {lead.status}
-                          </span>
+                  {sampleLeads.length > 0 ? (
+                    sampleLeads.map((lead, idx) => (
+                      <button
+                        key={lead.id}
+                        type="button"
+                        onClick={() => setPreviewLeadIdx(idx)}
+                        className={`w-full text-left p-3.5 rounded-2xl border transition flex items-center justify-between ${
+                          idx === previewLeadIdx
+                            ? "border-neutral-900 dark:border-white bg-neutral-50 dark:bg-neutral-800/60 shadow-2xs"
+                            : "border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/30"
+                        }`}
+                      >
+                        <div>
+                          <div className="text-sm font-semibold flex items-center gap-2">
+                            <span>{lead.businessName}</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-200/70 dark:bg-neutral-700 font-medium">
+                              {lead.status}
+                            </span>
+                          </div>
+                          <div className="text-xs text-neutral-500 mt-0.5">
+                            {lead.contactPerson} · {lead.industry} · {lead.city}
+                          </div>
                         </div>
-                        <div className="text-xs text-neutral-500 mt-0.5">
-                          {lead.contactPerson} · {lead.industry} · {lead.city}
+                        <div className="text-right">
+                          <div className="text-xs font-bold">
+                            ${lead.estimatedProjectValue.toLocaleString()}
+                          </div>
+                          <div className="text-[10px] text-neutral-400">
+                            {lead.websiteStatus}
+                          </div>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs font-bold">
-                          ${lead.estimatedProjectValue.toLocaleString()}
-                        </div>
-                        <div className="text-[10px] text-neutral-400">
-                          {lead.websiteStatus}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="p-8 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-2xl bg-white dark:bg-neutral-900">
+                      <Users className="w-8 h-8 mx-auto mb-2 text-neutral-400 opacity-60" />
+                      <p className="font-semibold text-neutral-700 dark:text-neutral-300">
+                        CRM Ready for Real Leads
+                      </p>
+                      <p className="mt-1 text-neutral-400">
+                        All dummy data has been purged. Add real leads manually or import via CSV inside your workspace.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="lg:col-span-7 p-5 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50">
@@ -688,7 +700,7 @@ export function InteractiveLandingPage({
                       </span>
                       <h4 className="text-base font-semibold">
                         Unified Communication Timeline:{" "}
-                        {selectedPreviewLead?.businessName}
+                        {selectedPreviewLead?.businessName || "Live Activity Stream"}
                       </h4>
                     </div>
                     <div className="flex items-center gap-1.5 text-xs">
@@ -711,39 +723,51 @@ export function InteractiveLandingPage({
                   </div>
 
                   <div className="mt-4 space-y-3">
-                    {unifiedTimelineEvents
-                      .filter((e) => e.step <= simulatedTimelineStep)
-                      .map((ev) => (
-                        <div
-                          key={ev.step}
-                          className="p-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 flex items-start justify-between gap-3"
-                        >
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span
-                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ev.badge}`}
-                              >
-                                {ev.channel}
-                              </span>
-                              <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800">
-                                {ev.direction}
-                              </span>
-                              <span className="text-xs font-medium">
-                                {ev.actor}
-                              </span>
+                    {sampleLeads.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-900">
+                        <MessageSquare className="w-6 h-6 mx-auto mb-2 text-neutral-400 opacity-60" />
+                        <p className="font-medium text-neutral-700 dark:text-neutral-300">
+                          Omnichannel Timeline Ready
+                        </p>
+                        <p className="mt-0.5">
+                          When you send Gmail emails, WhatsApp chats, or Twilio calls, cross-channel communication records stream here automatically.
+                        </p>
+                      </div>
+                    ) : (
+                      unifiedTimelineEvents
+                        .filter((e) => e.step <= simulatedTimelineStep)
+                        .map((ev) => (
+                          <div
+                            key={ev.step}
+                            className="p-3.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 flex items-start justify-between gap-3"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ev.badge}`}
+                                >
+                                  {ev.channel}
+                                </span>
+                                <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800">
+                                  {ev.direction}
+                                </span>
+                                <span className="text-xs font-medium">
+                                  {ev.actor}
+                                </span>
+                              </div>
+                              <p className="text-xs text-neutral-700 dark:text-neutral-300">
+                                {ev.summary}
+                              </p>
+                              <div className="text-[10px] font-mono text-neutral-400">
+                                {ev.meta}
+                              </div>
                             </div>
-                            <p className="text-xs text-neutral-700 dark:text-neutral-300">
-                              {ev.summary}
-                            </p>
-                            <div className="text-[10px] font-mono text-neutral-400">
-                              {ev.meta}
-                            </div>
+                            <span className="text-[11px] text-neutral-400 shrink-0">
+                              {ev.date}
+                            </span>
                           </div>
-                          <span className="text-[11px] text-neutral-400 shrink-0">
-                            {ev.date}
-                          </span>
-                        </div>
-                      ))}
+                        ))
+                    )}
                   </div>
                 </div>
               </div>
@@ -770,27 +794,33 @@ export function InteractiveLandingPage({
                     a real-time notification.
                   </p>
                   <div className="space-y-2.5">
-                    {(db.campaigns || []).map((camp) => (
-                      <div
-                        key={camp.id}
-                        className="p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-950/60 flex items-center justify-between"
-                      >
-                        <div>
-                          <div className="text-xs font-semibold">
-                            {camp.name}
+                    {(db.campaigns || []).length > 0 ? (
+                      (db.campaigns || []).map((camp) => (
+                        <div
+                          key={camp.id}
+                          className="p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/60 dark:bg-neutral-950/60 flex items-center justify-between"
+                        >
+                          <div>
+                            <div className="text-xs font-semibold">
+                              {camp.name}
+                            </div>
+                            <div className="text-[11px] text-neutral-500">
+                              {camp.communicationChannels?.join(" + ") ||
+                                "Multi-Channel"}{" "}
+                              · Target: {camp.targetIndustry} (
+                              {camp.targetCountry})
+                            </div>
                           </div>
-                          <div className="text-[11px] text-neutral-500">
-                            {camp.communicationChannels?.join(" + ") ||
-                              "Multi-Channel"}{" "}
-                            · Target: {camp.targetIndustry} (
-                            {camp.targetCountry})
-                          </div>
+                          <span className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                            {camp.status}
+                          </span>
                         </div>
-                        <span className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                          {camp.status}
-                        </span>
+                      ))
+                    ) : (
+                      <div className="p-4 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-900">
+                        No active campaigns yet. Create targeted outreach campaigns in the Outreach module.
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
 
@@ -798,22 +828,28 @@ export function InteractiveLandingPage({
                   <div className="text-xs font-semibold">
                     Recent Synchronized Outreach Activity
                   </div>
-                  {db.outreach.slice(0, 4).map((o) => (
-                    <div
-                      key={o.id}
-                      className="p-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/70 dark:border-neutral-800 text-xs space-y-1"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold">{o.leadName}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800">
-                          {o.communicationChannel} · {o.replyStatus}
-                        </span>
+                  {db.outreach.length > 0 ? (
+                    db.outreach.slice(0, 4).map((o) => (
+                      <div
+                        key={o.id}
+                        className="p-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/70 dark:border-neutral-800 text-xs space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold">{o.leadName}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800">
+                            {o.communicationChannel} · {o.replyStatus}
+                          </span>
+                        </div>
+                        <p className="text-neutral-500 line-clamp-1">
+                          {o.messageContent}
+                        </p>
                       </div>
-                      <p className="text-neutral-500 line-clamp-1">
-                        {o.messageContent}
-                      </p>
+                    ))
+                  ) : (
+                    <div className="p-4 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-neutral-900">
+                      Zero outreach messages sent yet. Send real emails or WhatsApp messages inside the workspace.
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             )}
@@ -855,84 +891,108 @@ export function InteractiveLandingPage({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {(db.coldCalls || [])
-                    .filter(
-                      (c) =>
-                        callFilterOutcome === "ALL" ||
-                        c.outcome === callFilterOutcome
-                    )
-                    .map((call) => (
-                      <div
-                        key={call.id}
-                        className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 flex items-start justify-between gap-3"
-                      >
-                        <div>
-                          <div className="text-sm font-semibold">
-                            {call.businessName}
+                  {(db.coldCalls || []).length > 0 ? (
+                    (db.coldCalls || [])
+                      .filter(
+                        (c) =>
+                          callFilterOutcome === "ALL" ||
+                          c.outcome === callFilterOutcome
+                      )
+                      .map((call) => (
+                        <div
+                          key={call.id}
+                          className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 flex items-start justify-between gap-3"
+                        >
+                          <div>
+                            <div className="text-sm font-semibold">
+                              {call.businessName}
+                            </div>
+                            <div className="text-xs text-neutral-500 font-mono mt-0.5">
+                              {call.phoneNumber} ·{" "}
+                              {call.durationSeconds != null
+                                ? `${Math.floor(call.durationSeconds / 60)}m ${
+                                    call.durationSeconds % 60
+                                  }s`
+                                : "No Duration"}
+                            </div>
+                            <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1.5">
+                              {call.notes}
+                            </p>
                           </div>
-                          <div className="text-xs text-neutral-500 font-mono mt-0.5">
-                            {call.phoneNumber} ·{" "}
-                            {call.durationSeconds != null
-                              ? `${Math.floor(call.durationSeconds / 60)}m ${
-                                  call.durationSeconds % 60
-                                }s`
-                              : "No Duration"}
-                          </div>
-                          <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1.5">
-                            {call.notes}
-                          </p>
+                          <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 shrink-0">
+                            {call.outcome}
+                          </span>
                         </div>
-                        <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 shrink-0">
-                          {call.outcome}
-                        </span>
-                      </div>
-                    ))}
+                      ))
+                  ) : (
+                    <div className="col-span-full p-8 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-2xl bg-white dark:bg-neutral-900">
+                      <Phone className="w-8 h-8 mx-auto mb-2 text-neutral-400 opacity-60" />
+                      <p className="font-semibold text-neutral-700 dark:text-neutral-300">
+                        Cold Calling Floor Clean
+                      </p>
+                      <p className="mt-1 text-neutral-400">
+                        All dummy calls removed. Log real discovery calls or connect Twilio Voice for 1-click browser calling.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
             {activeTab === "delivery" && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {db.projects.map((proj) => (
-                  <div
-                    key={proj.id}
-                    className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 space-y-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
+                {db.projects.length > 0 ? (
+                  db.projects.map((proj) => (
+                    <div
+                      key={proj.id}
+                      className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold">
+                            {proj.projectName}
+                          </div>
+                          <div className="text-xs text-neutral-500">
+                            {proj.projectType}
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-neutral-200/70 dark:bg-neutral-800">
+                          {proj.projectStatus}
+                        </span>
+                      </div>
                       <div>
-                        <div className="text-sm font-semibold">
-                          {proj.projectName}
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-neutral-500">
+                            Milestone Progress
+                          </span>
+                          <span className="font-semibold">
+                            {proj.progressPercentage}%
+                          </span>
                         </div>
-                        <div className="text-xs text-neutral-500">
-                          {proj.projectType}
+                        <div className="h-2 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-emerald-500"
+                            style={{ width: `${proj.progressPercentage}%` }}
+                          />
                         </div>
                       </div>
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-neutral-200/70 dark:bg-neutral-800">
-                        {proj.projectStatus}
-                      </span>
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="text-neutral-500">
-                          Milestone Progress
-                        </span>
-                        <span className="font-semibold">
-                          {proj.progressPercentage}%
-                        </span>
-                      </div>
-                      <div className="h-2 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-emerald-500"
-                          style={{ width: `${proj.progressPercentage}%` }}
-                        />
+                      <div className="flex items-center justify-between text-xs text-neutral-500 pt-1">
+                        <span>Budget: ${proj.projectBudget.toLocaleString()}</span>
+                        <span>Due: {proj.deadline}</span>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between text-xs text-neutral-500 pt-1">
-                      <span>Budget: ${proj.projectBudget.toLocaleString()}</span>
-                      <span>Due: {proj.deadline}</span>
-                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-full p-8 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-2xl bg-white dark:bg-neutral-900">
+                    <FolderKanban className="w-8 h-8 mx-auto mb-2 text-neutral-400 opacity-60" />
+                    <p className="font-semibold text-neutral-700 dark:text-neutral-300">
+                      No Active Projects
+                    </p>
+                    <p className="mt-1 text-neutral-400">
+                      All dummy projects purged. Convert closed CRM leads into active delivery projects inside your workspace.
+                    </p>
                   </div>
-                ))}
+                )}
               </div>
             )}
 
@@ -950,31 +1010,43 @@ export function InteractiveLandingPage({
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {db.finance.slice(0, 6).map((f) => (
-                    <div
-                      key={f.id}
-                      className="p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 flex items-center justify-between text-xs"
-                    >
-                      <div>
-                        <div className="font-semibold">{f.invoiceNumber}</div>
-                        <div className="text-neutral-500">
-                          {db.clients.find((c) => c.id === f.clientId)
-                            ?.businessName ||
-                            db.projects.find((p) => p.id === f.projectId)
-                              ?.projectName ||
-                            f.notes}
+                  {db.finance.length > 0 ? (
+                    db.finance.slice(0, 6).map((f) => (
+                      <div
+                        key={f.id}
+                        className="p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 flex items-center justify-between text-xs"
+                      >
+                        <div>
+                          <div className="font-semibold">{f.invoiceNumber}</div>
+                          <div className="text-neutral-500">
+                            {db.clients.find((c) => c.id === f.clientId)
+                              ?.businessName ||
+                              db.projects.find((p) => p.id === f.projectId)
+                                ?.projectName ||
+                              f.notes}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-bold">
+                            {f.currency} {f.amount.toLocaleString()}
+                          </div>
+                          <div className="text-[10px] text-neutral-400">
+                            {f.paymentStatus}
+                          </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-bold">
-                          {f.currency} {f.amount.toLocaleString()}
-                        </div>
-                        <div className="text-[10px] text-neutral-400">
-                          {f.paymentStatus}
-                        </div>
-                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-full p-8 text-center text-xs text-neutral-400 border border-dashed border-neutral-200 dark:border-neutral-800 rounded-2xl bg-white dark:bg-neutral-900">
+                      <DollarSign className="w-8 h-8 mx-auto mb-2 text-neutral-400 opacity-60" />
+                      <p className="font-semibold text-neutral-700 dark:text-neutral-300">
+                        Financial Ledger Clean
+                      </p>
+                      <p className="mt-1 text-neutral-400">
+                        All dummy transactions cleared. Record real client invoices, deposits, and retainers with zero clutter.
+                      </p>
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             )}
