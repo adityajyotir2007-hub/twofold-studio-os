@@ -194,6 +194,7 @@ export async function POST(req: NextRequest) {
 
   const authActions = new Set([
     "login",
+    "google_login",
     "logout",
     "forgot_password",
     "reset_password",
@@ -1347,6 +1348,69 @@ async function handleAuthPost(
         ok: true,
         token,
         member: authResult.member,
+      });
+      res.cookies.set(SESSION_COOKIE_NAME, token, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 7 * 24 * 60 * 60,
+      });
+      return res;
+    }
+
+    if (action === "google_login") {
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!email) {
+        return NextResponse.json(
+          { error: "Google email is required." },
+          { status: 400 }
+        );
+      }
+      const rawName = String(body.name || email.split("@")[0] || "Agency Leader");
+      const name = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+      const role: UserRole = "Admin";
+      const title = String(body.title || "Executive Director & Founder");
+
+      const db = readAgencyDb();
+      let member = (db.teamMembers || []).find(
+        (m) => m.email.toLowerCase() === email
+      );
+
+      if (!member) {
+        const initials =
+          name
+            .split(" ")
+            .map((w) => w[0])
+            .join("")
+            .toUpperCase()
+            .slice(0, 2) || "TF";
+
+        member = {
+          id: `tm-${Date.now()}`,
+          name,
+          email,
+          role,
+          title,
+          avatarInitials: initials,
+          phone: "+1 (415) 890-4421",
+          department: "Executive Leadership",
+          hourlyRate: 185,
+          status: "Active",
+          dailyTargets: { calls: 10, emails: 20, dms: 10, leadsAdded: 10 },
+          isDemo: false,
+          createdAt: new Date().toISOString().slice(0, 10),
+        };
+
+        db.teamMembers = [member, ...(db.teamMembers || [])];
+        writeAgencyDb(db);
+        registerOrUpdateUserPassword(member.id, email, "Twofold2026!");
+      }
+
+      const token = createSessionToken(member);
+      const res = NextResponse.json({
+        ok: true,
+        token,
+        member,
       });
       res.cookies.set(SESSION_COOKIE_NAME, token, {
         httpOnly: true,

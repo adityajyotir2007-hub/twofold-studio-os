@@ -68,6 +68,12 @@ interface AgencyContextValue {
     email: string,
     password: string
   ) => Promise<{ ok: boolean; error?: string }>;
+  loginWithGoogle: (googleUser?: {
+    name: string;
+    email: string;
+    role?: UserRole;
+    title?: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
   inviteTeamMember: (params: {
     name: string;
@@ -493,6 +499,82 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
         return {
           ok: false,
           error: err instanceof Error ? err.message : "Network error during sign-in",
+        };
+      }
+    },
+    [db.teamMembers, refreshState]
+  );
+
+  const loginWithGoogle = useCallback(
+    async (googleUser?: {
+      name: string;
+      email: string;
+      role?: UserRole;
+      title?: string;
+    }) => {
+      try {
+        const userPayload = googleUser || {
+          name: "Agency Executive",
+          email: "founder@twofold.studio",
+          role: "Admin" as UserRole,
+          title: "CEO",
+        };
+
+        const res = await fetch("/api/integrations?__auth=1", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "google_login",
+            email: userPayload.email,
+            name: userPayload.name,
+            role: userPayload.role || "Admin",
+            title: userPayload.title || "CEO",
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (data.ok && data.member) {
+          setSessionMember(data.member);
+          setIsAuthenticated(true);
+          refreshState();
+          return { ok: true };
+        }
+
+        // Serverless fallback
+        const cleanEmail = userPayload.email.trim().toLowerCase();
+        const existingMember = db.teamMembers.find(
+          (m) => m.email.toLowerCase() === cleanEmail
+        );
+        const member: TeamMember = existingMember || {
+          id: `tm-${Date.now()}`,
+          name: userPayload.name,
+          email: cleanEmail,
+          role: userPayload.role || "Admin",
+          title: userPayload.title || "CEO",
+          avatarInitials: userPayload.name
+            .split(" ")
+            .map((w) => w[0])
+            .join("")
+            .toUpperCase()
+            .slice(0, 2) || "TF",
+          phone: "+1 (415) 890-4421",
+          department: "Executive Leadership",
+          hourlyRate: 185,
+          status: "Active",
+          dailyTargets: { calls: 10, emails: 20, dms: 10, leadsAdded: 10 },
+          isDemo: false,
+          createdAt: todayDate(),
+        };
+
+        setSessionMember(member);
+        setIsAuthenticated(true);
+        refreshState();
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error:
+            err instanceof Error ? err.message : "Google authentication error",
         };
       }
     },
@@ -1561,6 +1643,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       toggleTheme,
       refreshState,
       loginWithEmail,
+      loginWithGoogle,
       logout,
       inviteTeamMember,
       acceptInvitation,
@@ -1631,6 +1714,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       toggleTheme,
       refreshState,
       loginWithEmail,
+      loginWithGoogle,
       logout,
       inviteTeamMember,
       acceptInvitation,

@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useAgency } from "@/context/AgencyContext";
-import { AuthScreen } from "@/components/AuthScreen";
+import { AuthScreen, GoogleLogo } from "@/components/AuthScreen";
 import {
   Activity,
   ArrowRight,
@@ -282,9 +282,21 @@ export function InteractiveLandingPage({
                 if (onOpenSignIn) onOpenSignIn();
                 setShowAuthModal(true);
               }}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition shadow-2xs text-neutral-800 dark:text-neutral-100"
+            >
+              <GoogleLogo className="w-3.5 h-3.5 shrink-0" />
+              <span>Sign in with Google</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (onOpenSignIn) onOpenSignIn();
+                setShowAuthModal(true);
+              }}
               className="px-3.5 py-2 rounded-xl text-xs font-medium border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition"
             >
-              Sign In
+              Email Sign In
             </button>
 
             <button
@@ -328,8 +340,17 @@ export function InteractiveLandingPage({
             and revenue in real time.
           </p>
 
-          {/* Instant 1-Click Role Launchers */}
+          {/* Instant Google Login & Role Launchers */}
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowAuthModal(true)}
+              className="inline-flex items-center gap-2.5 px-5 py-3 rounded-xl text-sm font-semibold bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition shadow-sm text-neutral-900 dark:text-white"
+            >
+              <GoogleLogo className="w-4 h-4 shrink-0" />
+              <span>Continue with Google</span>
+            </button>
+
             <button
               type="button"
               onClick={() => handleInstantRoleLaunch("elena@twofold.studio")}
