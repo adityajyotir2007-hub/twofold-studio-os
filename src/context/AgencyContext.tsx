@@ -249,9 +249,6 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
         const serverData = (await res.json()) as AgencyDatabaseState;
         if (serverData && serverData.teamMembers) {
           setDb(serverData);
-          if (serverData.settings?.themePreference) {
-            setTheme(serverData.settings.themePreference);
-          }
         }
       }
     } catch {
@@ -343,13 +340,30 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isAuthenticated, refreshState]);
 
-  // Sync theme class with document root
+  // Load device-local theme preference on mount
+  useEffect(() => {
+    try {
+      const savedTheme = window.localStorage.getItem("twofold_theme");
+      if (savedTheme === "dark" || savedTheme === "light") {
+        setTheme(savedTheme);
+      }
+    } catch {
+      // ignore localStorage errors
+    }
+  }, []);
+
+  // Sync theme class with document root and persist per-device in localStorage
   useEffect(() => {
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
     } else {
       root.classList.remove("dark");
+    }
+    try {
+      window.localStorage.setItem("twofold_theme", theme);
+    } catch {
+      // ignore localStorage errors
     }
   }, [theme]);
 
@@ -715,14 +729,11 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next = prev === "light" ? "dark" : "light";
-      fetch("/api/transactions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "update_settings",
-          updates: { themePreference: next },
-        }),
-      }).catch(() => {});
+      try {
+        window.localStorage.setItem("twofold_theme", next);
+      } catch {
+        // ignore localStorage errors
+      }
       return next;
     });
   }, []);
@@ -1609,16 +1620,27 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
     (updates: Partial<AgencySettings>) => {
       if (updates.themePreference) {
         setTheme(updates.themePreference);
+        try {
+          window.localStorage.setItem("twofold_theme", updates.themePreference);
+        } catch {
+          // ignore localStorage errors
+        }
       }
+      const { themePreference: _ignoredTheme, ...serverUpdates } = updates;
       setDb((prev) => ({
         ...prev,
         settings: { ...prev.settings, ...updates },
       }));
-      fetch("/api/transactions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "update_settings", updates }),
-      }).then(() => refreshState());
+      if (Object.keys(serverUpdates).length > 0) {
+        fetch("/api/transactions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "update_settings",
+            updates: serverUpdates,
+          }),
+        }).then(() => refreshState());
+      }
     },
     [refreshState]
   );
