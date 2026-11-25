@@ -16,6 +16,13 @@ import {
   isValidEmail,
   isValidUrl,
 } from "@/lib/validation";
+import {
+  buildPersonalizedOutreachMessages,
+  cleanWhatsAppPhone,
+  detectNewlyAddedSocialChannels,
+  extractInstagramHandle,
+  SocialOutreachChannel,
+} from "@/lib/auto-outreach";
 import { Lead, LeadSource, LeadStatus, PriorityLevel } from "@/types/agency";
 import {
   AlertTriangle,
@@ -23,8 +30,10 @@ import {
   ArrowUpDown,
   ArrowUpRight,
   Calendar,
+  Check,
   CheckCircle2,
   CheckSquare,
+  Copy,
   Download,
   Edit3,
   ExternalLink,
@@ -32,10 +41,12 @@ import {
   History,
   Kanban,
   LayoutList,
+  Mail,
   MessageSquare,
   Phone,
   Plus,
   Search,
+  Send,
   Sparkles,
   Star,
   Trash2,
@@ -55,7 +66,8 @@ const MAPPABLE_CRM_FIELDS: { key: keyof Lead; label: string }[] = [
   { key: "businessName", label: "Business Name *" },
   { key: "contactPerson", label: "Contact Person" },
   { key: "businessEmail", label: "Business Email" },
-  { key: "phoneNumber", label: "Phone Number" },
+  { key: "phoneNumber", label: "WhatsApp / Phone" },
+  { key: "instagramUrl", label: "Instagram (@handle / URL)" },
   { key: "websiteUrl", label: "Website URL" },
   { key: "industry", label: "Industry" },
   { key: "country", label: "Country" },
@@ -73,6 +85,9 @@ export function LeadsCrmView() {
     permissions,
     addLead,
     updateLead,
+    sendLeadPersonalizedOutreach,
+    lastAutoOutreachResult,
+    clearAutoOutreachResult,
     deleteLead,
     bulkUpdateLeads,
     bulkDeleteLeads,
@@ -242,14 +257,132 @@ export function LeadsCrmView() {
 
   const [formState, setFormState] = useState(emptyForm);
 
+  // Auto-Personalized DM on Add / Social Update state
+  const [autoDmOnSave, setAutoDmOnSave] = useState(true);
+  const [selectedAutoChannels, setSelectedAutoChannels] = useState<
+    Record<SocialOutreachChannel, boolean>
+  >({
+    instagram: true,
+    email: true,
+    whatsapp: true,
+  });
+  const [previewChannelTab, setPreviewChannelTab] =
+    useState<SocialOutreachChannel>("instagram");
+  const [customIgMsg, setCustomIgMsg] = useState("");
+  const [customEmailSubj, setCustomEmailSubj] = useState("");
+  const [customEmailBody, setCustomEmailBody] = useState("");
+  const [customWaMsg, setCustomWaMsg] = useState("");
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Quick Add Socials & Auto-DM Modal state
+  const [quickSocialLead, setQuickSocialLead] = useState<Lead | null>(null);
+  const [quickIgInput, setQuickIgInput] = useState("");
+  const [quickEmailInput, setQuickEmailInput] = useState("");
+  const [quickPhoneInput, setQuickPhoneInput] = useState("");
+  const [quickSending, setQuickSending] = useState(false);
+
+  const generatedFormPreview = useMemo(
+    () =>
+      buildPersonalizedOutreachMessages(
+        formState,
+        db.templates,
+        currentUser.name,
+        db.settings.agencyName
+      ),
+    [formState, db.templates, currentUser.name, db.settings.agencyName]
+  );
+
+  const detectedModalChannels = useMemo(
+    () => detectNewlyAddedSocialChannels(editingLead, formState),
+    [editingLead, formState]
+  );
+
+  const activePreviewChannel: SocialOutreachChannel =
+    detectedModalChannels.includes(previewChannelTab)
+      ? previewChannelTab
+      : detectedModalChannels[0] || "instagram";
+
+  const resetAutoDmCustomizations = () => {
+    setAutoDmOnSave(true);
+    setSelectedAutoChannels({ instagram: true, email: true, whatsapp: true });
+    setCustomIgMsg("");
+    setCustomEmailSubj("");
+    setCustomEmailBody("");
+    setCustomWaMsg("");
+  };
+
+  const copyTextWithFeedback = async (key: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => {
+        setCopiedKey((prev) => (prev === key ? null : prev));
+      }, 2500);
+    } catch {
+      // clipboard fallback ignored
+    }
+  };
+
+  const openQuickSocialModal = (lead: Lead) => {
+    setQuickSocialLead(lead);
+    const handle = extractInstagramHandle(
+      lead.instagramUrl || lead.instagramHandle
+    );
+    setQuickIgInput(handle ? `@${handle}` : lead.instagramUrl || "");
+    setQuickEmailInput(lead.businessEmail || "");
+    setQuickPhoneInput(lead.phoneNumber || "");
+  };
+
+  const handleSaveQuickSocials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickSocialLead) return;
+    setQuickSending(true);
+    try {
+      const updates: Partial<Lead> = {
+        instagramUrl: quickIgInput.trim(),
+        businessEmail: quickEmailInput.trim(),
+        phoneNumber: quickPhoneInput.trim(),
+        whatsappOptIn:
+          cleanWhatsAppPhone(quickPhoneInput).length >= 7
+            ? true
+            : quickSocialLead.whatsappOptIn,
+      };
+      const newlyAdded = detectNewlyAddedSocialChannels(
+        quickSocialLead,
+        updates
+      );
+      // If user clicked Send DM when socials were already present, send to all available channels
+      const fallbackAllChannels: SocialOutreachChannel[] = [];
+      if (extractInstagramHandle(updates.instagramUrl))
+        fallbackAllChannels.push("instagram");
+      if (updates.businessEmail && isValidEmail(updates.businessEmail))
+        fallbackAllChannels.push("email");
+      if (cleanWhatsAppPhone(updates.phoneNumber).length >= 7)
+        fallbackAllChannels.push("whatsapp");
+
+      const targetChannels =
+        newlyAdded.length > 0 ? newlyAdded : fallbackAllChannels;
+
+      updateLead(quickSocialLead.id, updates, {
+        enabled: targetChannels.length > 0,
+        channels: targetChannels,
+      });
+      setQuickSocialLead(null);
+    } finally {
+      setQuickSending(false);
+    }
+  };
+
   const openAddModal = () => {
     setEditingLead(null);
-    setFormState(emptyForm);
+    setFormState({ ...emptyForm, whatsappOptIn: true });
+    resetAutoDmCustomizations();
     setIsFormOpen(true);
   };
 
   const openEditModal = (lead: Lead) => {
     setEditingLead(lead);
+    resetAutoDmCustomizations();
     setFormState({
       businessName: lead.businessName,
       contactPerson: lead.contactPerson,
@@ -284,16 +417,39 @@ export function LeadsCrmView() {
 
   const handleSaveLead = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formState.businessName.trim() || !formState.contactPerson.trim())
-      return;
+    if (!formState.businessName.trim()) return;
+    const normalizedPayload = {
+      ...formState,
+      contactPerson: formState.contactPerson.trim() || "Founder",
+      whatsappOptIn:
+        formState.whatsappOptIn ||
+        cleanWhatsAppPhone(formState.phoneNumber).length >= 7,
+    };
+    const activeChannels = detectedModalChannels.filter(
+      (ch) => selectedAutoChannels[ch]
+    );
+    const autoOpts = {
+      enabled: autoDmOnSave && activeChannels.length > 0,
+      channels: activeChannels,
+      customMessages: {
+        instagramMessage: customIgMsg.trim() || undefined,
+        emailSubject: customEmailSubj.trim() || undefined,
+        emailBody: customEmailBody.trim() || undefined,
+        whatsappMessage: customWaMsg.trim() || undefined,
+      },
+    };
+
     if (editingLead) {
-      updateLead(editingLead.id, formState);
-      if (formState.status === "Converted" && !editingLead.convertedClientId) {
-        setConvertModalLead({ ...editingLead, ...formState });
+      updateLead(editingLead.id, normalizedPayload, autoOpts);
+      if (
+        normalizedPayload.status === "Converted" &&
+        !editingLead.convertedClientId
+      ) {
+        setConvertModalLead({ ...editingLead, ...normalizedPayload });
       }
     } else {
-      const created = addLead(formState);
-      if (formState.status === "Converted") {
+      const created = addLead(normalizedPayload, autoOpts);
+      if (normalizedPayload.status === "Converted") {
         setConvertModalLead(created);
       }
     }
@@ -442,7 +598,8 @@ export function LeadsCrmView() {
     guessed.businessName = matchHeader(["business", "company", "organization", "name"]);
     guessed.contactPerson = matchHeader(["contact", "person", "founder", "owner"]);
     guessed.businessEmail = matchHeader(["email", "e-mail", "mail"]);
-    guessed.phoneNumber = matchHeader(["phone", "tel", "mobile"]);
+    guessed.phoneNumber = matchHeader(["phone", "tel", "mobile", "whatsapp"]);
+    guessed.instagramUrl = matchHeader(["instagram", "insta", "ig_handle"]);
     guessed.websiteUrl = matchHeader(["website", "url", "domain", "site"]);
     guessed.industry = matchHeader(["industry", "category", "niche", "sector"]);
     guessed.country = matchHeader(["country", "nation"]);
@@ -516,6 +673,7 @@ export function LeadsCrmView() {
         contactPerson: getVal("contactPerson") || "Founder",
         businessEmail: getVal("businessEmail"),
         phoneNumber: getVal("phoneNumber"),
+        instagramUrl: getVal("instagramUrl"),
         websiteUrl: getVal("websiteUrl"),
         industry: getVal("industry") || "SaaS & Technology",
         country: getVal("country") || "United States",
@@ -674,6 +832,121 @@ export function LeadsCrmView() {
           >
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* AUTO-PERSONALIZED DM & OUTREACH DISPATCH BANNER */}
+      {lastAutoOutreachResult && lastAutoOutreachResult.results.length > 0 && (
+        <div className="p-4 rounded-xl bg-white dark:bg-neutral-900 border-2 border-emerald-500/50 dark:border-emerald-500/40 shadow-sm space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <Send className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <h3 className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
+                  Personalized Outreach Generated for{" "}
+                  {lastAutoOutreachResult.businessName}
+                </h3>
+                <p className="text-[11px] text-neutral-500">
+                  Logged to Unified Timeline &amp; CRM status updated to{" "}
+                  <span className="font-medium text-neutral-700 dark:text-neutral-300">
+                    Contacted
+                  </span>
+                  . Connected APIs send automatically; use 1-click buttons below
+                  to launch direct app threads.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={clearAutoOutreachResult}
+              className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+            {lastAutoOutreachResult.results.map((item) => (
+              <div
+                key={item.outreachId}
+                className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 flex flex-col justify-between gap-2.5 text-xs"
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                      {item.label} ·{" "}
+                      <span className="font-normal text-neutral-500">
+                        {item.target}
+                      </span>
+                    </span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                        item.sentViaApi
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                          : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                      }`}
+                    >
+                      {item.sentViaApi ? "Sent via API" : "Ready · Logged"}
+                    </span>
+                  </div>
+                  {item.subject && (
+                    <div className="text-[11px] font-medium text-neutral-700 dark:text-neutral-300 truncate">
+                      Subject: {item.subject}
+                    </div>
+                  )}
+                  <p className="text-[11px] text-neutral-500 line-clamp-3 whitespace-pre-line">
+                    {item.messagePreview}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-neutral-200/60 dark:border-neutral-800">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      copyTextWithFeedback(item.outreachId, item.messagePreview)
+                    }
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-[11px] font-medium"
+                  >
+                    {copiedKey === item.outreachId ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-600" /> Copied DM
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" /> Copy DM
+                      </>
+                    )}
+                  </button>
+
+                  {item.launchUrl && (
+                    <a
+                      href={item.launchUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={() => {
+                        if (item.channel === "instagram") {
+                          navigator.clipboard
+                            ?.writeText(item.messagePreview)
+                            .catch(() => {});
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:opacity-90 text-[11px] font-medium"
+                    >
+                      {item.channel === "instagram"
+                        ? "Copy & Open IG DM"
+                        : item.channel === "whatsapp"
+                        ? "Send on WhatsApp"
+                        : "Open in Gmail"}{" "}
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -918,7 +1191,33 @@ export function LeadsCrmView() {
                             )}
                           </div>
                           <div className="text-[11px] text-neutral-500">
-                            {lead.contactPerson} · {lead.businessEmail}
+                            {lead.contactPerson}
+                            {lead.businessEmail ? ` · ${lead.businessEmail}` : ""}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {extractInstagramHandle(
+                              lead.instagramUrl || lead.instagramHandle
+                            ) && (
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded bg-pink-50 text-pink-700 dark:bg-pink-950/50 dark:text-pink-300 text-[10px] font-medium">
+                                @
+                                {extractInstagramHandle(
+                                  lead.instagramUrl || lead.instagramHandle
+                                )}
+                              </span>
+                            )}
+                            {cleanWhatsAppPhone(lead.phoneNumber).length >= 7 && (
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 text-[10px] font-medium">
+                                WA: {lead.phoneNumber}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => openQuickSocialModal(lead)}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded border border-dashed border-neutral-300 dark:border-neutral-700 hover:border-neutral-900 dark:hover:border-white text-[10px] text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition"
+                              title="Add Instagram, Email, or WhatsApp & auto-send personalized DM"
+                            >
+                              <Plus className="w-2.5 h-2.5" /> Socials / Auto-DM
+                            </button>
                           </div>
                         </td>
                         <td className="py-3 px-3">
@@ -999,6 +1298,35 @@ export function LeadsCrmView() {
                         </td>
                         <td className="py-3 px-3 text-right">
                           <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const hasAnySocial =
+                                  Boolean(
+                                    extractInstagramHandle(
+                                      lead.instagramUrl || lead.instagramHandle
+                                    )
+                                  ) ||
+                                  Boolean(
+                                    lead.businessEmail &&
+                                      isValidEmail(lead.businessEmail)
+                                  ) ||
+                                  cleanWhatsAppPhone(lead.phoneNumber).length >=
+                                    7;
+                                if (!hasAnySocial) {
+                                  openQuickSocialModal(lead);
+                                  return;
+                                }
+                                sendLeadPersonalizedOutreach({
+                                  leadId: lead.id,
+                                  lead,
+                                });
+                              }}
+                              title="Send Personalized DM / Email across socials"
+                              className="px-2 py-1 rounded text-[11px] font-medium bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 inline-flex items-center gap-1"
+                            >
+                              <Send className="w-3 h-3" /> Auto-DM
+                            </button>
                             {!lead.convertedClientId && (
                               <button
                                 type="button"
@@ -1243,6 +1571,74 @@ export function LeadsCrmView() {
                     <span className="text-neutral-500">
                       Chronological feed of emails, replies, Instagram DMs, WhatsApp messages, LinkedIn outreach, cold calls, and notes (deduplicated by provider ID).
                     </span>
+                  </div>
+
+                  {/* Quick Personalized DM & Socials Trigger inside Drawer */}
+                  <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="text-neutral-600 dark:text-neutral-300 font-medium">
+                      Send Personalized DM:
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {extractInstagramHandle(
+                        activeLead.instagramUrl || activeLead.instagramHandle
+                      ) && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            sendLeadPersonalizedOutreach({
+                              leadId: activeLead.id,
+                              lead: activeLead,
+                              channels: ["instagram"],
+                            })
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-pink-600 text-white hover:bg-pink-500 font-medium inline-flex items-center gap-1"
+                        >
+                          <Send className="w-3 h-3" /> Insta DM (@
+                          {extractInstagramHandle(
+                            activeLead.instagramUrl || activeLead.instagramHandle
+                          )}
+                          )
+                        </button>
+                      )}
+                      {cleanWhatsAppPhone(activeLead.phoneNumber).length >= 7 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            sendLeadPersonalizedOutreach({
+                              leadId: activeLead.id,
+                              lead: activeLead,
+                              channels: ["whatsapp"],
+                            })
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 font-medium inline-flex items-center gap-1"
+                        >
+                          <Send className="w-3 h-3" /> WhatsApp DM
+                        </button>
+                      )}
+                      {activeLead.businessEmail &&
+                        isValidEmail(activeLead.businessEmail) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              sendLeadPersonalizedOutreach({
+                                leadId: activeLead.id,
+                                lead: activeLead,
+                                channels: ["email"],
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-500 font-medium inline-flex items-center gap-1"
+                          >
+                            <Mail className="w-3 h-3" /> Personalized Email
+                          </button>
+                        )}
+                      <button
+                        type="button"
+                        onClick={() => openQuickSocialModal(activeLead)}
+                        className="px-2.5 py-1 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 font-medium inline-flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> Add / Edit Socials
+                      </button>
+                    </div>
                   </div>
 
                   {/* Quick Add Internal Note to Timeline */}
@@ -1765,11 +2161,11 @@ export function LeadsCrmView() {
                 </div>
                 <div>
                   <label className="block font-medium mb-1">
-                    Contact Person *
+                    Contact Person
                   </label>
                   <input
-                    required
                     value={formState.contactPerson}
+                    placeholder="Founder or Owner name"
                     onChange={(e) =>
                       setFormState({
                         ...formState,
@@ -1820,12 +2216,12 @@ export function LeadsCrmView() {
                 </div>
                 <div>
                   <label className="block font-medium mb-1">
-                    Business Email *
+                    Business Email
                   </label>
                   <input
                     type="email"
-                    required
                     value={formState.businessEmail}
+                    placeholder="founder@brand.com"
                     onChange={(e) =>
                       setFormState({
                         ...formState,
@@ -1836,9 +2232,12 @@ export function LeadsCrmView() {
                   />
                 </div>
                 <div>
-                  <label className="block font-medium mb-1">Phone Number</label>
+                  <label className="block font-medium mb-1">
+                    WhatsApp / Phone Number
+                  </label>
                   <input
                     value={formState.phoneNumber}
+                    placeholder="+1 415 555 0199"
                     onChange={(e) =>
                       setFormState({
                         ...formState,
@@ -1865,10 +2264,11 @@ export function LeadsCrmView() {
                 </div>
                 <div>
                   <label className="block font-medium mb-1">
-                    Instagram URL
+                    Instagram (@handle or URL)
                   </label>
                   <input
                     value={formState.instagramUrl}
+                    placeholder="@brand or instagram.com/brand"
                     onChange={(e) =>
                       setFormState({
                         ...formState,
@@ -2155,6 +2555,144 @@ export function LeadsCrmView() {
                 </div>
               </div>
 
+              {/* AUTO-SEND PERSONALIZED DM ON ADDING SOCIALS */}
+              <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-950 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex items-center gap-2 font-semibold text-neutral-900 dark:text-neutral-100 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoDmOnSave}
+                      onChange={(e) => setAutoDmOnSave(e.target.checked)}
+                    />
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    Auto-send personalized DM &amp; Email when socials are added
+                  </label>
+
+                  {detectedModalChannels.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {detectedModalChannels.map((ch) => (
+                        <label
+                          key={ch}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-[11px] font-medium cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedAutoChannels[ch]}
+                            onChange={(e) =>
+                              setSelectedAutoChannels((prev) => ({
+                                ...prev,
+                                [ch]: e.target.checked,
+                              }))
+                            }
+                          />
+                          {ch === "instagram"
+                            ? `Instagram (@${generatedFormPreview.instagramHandle})`
+                            : ch === "whatsapp"
+                            ? `WhatsApp (+${generatedFormPreview.whatsappPhone})`
+                            : `Email (${generatedFormPreview.emailAddress})`}
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-neutral-400">
+                      Enter Instagram @handle, Email, or WhatsApp number above to trigger Auto-DM
+                    </span>
+                  )}
+                </div>
+
+                {autoDmOnSave && detectedModalChannels.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-neutral-200/70 dark:border-neutral-800">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1">
+                        {(["instagram", "whatsapp", "email"] as const)
+                          .filter((ch) => detectedModalChannels.includes(ch))
+                          .map((ch) => (
+                            <button
+                              key={ch}
+                              type="button"
+                              onClick={() => setPreviewChannelTab(ch)}
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${
+                                activePreviewChannel === ch
+                                  ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
+                                  : "text-neutral-500 hover:bg-neutral-200/60 dark:hover:bg-neutral-800"
+                              }`}
+                            >
+                              {ch === "instagram"
+                                ? "Instagram DM Preview"
+                                : ch === "whatsapp"
+                                ? "WhatsApp DM Preview"
+                                : "Email Preview"}
+                            </button>
+                          ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomIgMsg("");
+                          setCustomEmailSubj("");
+                          setCustomEmailBody("");
+                          setCustomWaMsg("");
+                        }}
+                        className="text-[11px] text-neutral-500 hover:underline"
+                      >
+                        Reset to Auto-Personalized
+                      </button>
+                    </div>
+
+                    {activePreviewChannel === "instagram" &&
+                      detectedModalChannels.includes("instagram") && (
+                        <textarea
+                          rows={3}
+                          value={
+                            customIgMsg || generatedFormPreview.instagramMessage
+                          }
+                          onChange={(e) => setCustomIgMsg(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs"
+                        />
+                      )}
+
+                    {activePreviewChannel === "whatsapp" &&
+                      detectedModalChannels.includes("whatsapp") && (
+                        <textarea
+                          rows={3}
+                          value={
+                            customWaMsg || generatedFormPreview.whatsappMessage
+                          }
+                          onChange={(e) => setCustomWaMsg(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs"
+                        />
+                      )}
+
+                    {activePreviewChannel === "email" &&
+                      detectedModalChannels.includes("email") && (
+                        <div className="space-y-1.5">
+                          <input
+                            value={
+                              customEmailSubj ||
+                              generatedFormPreview.emailSubject
+                            }
+                            onChange={(e) =>
+                              setCustomEmailSubj(e.target.value)
+                            }
+                            placeholder="Email Subject"
+                            className="w-full px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs font-medium"
+                          />
+                          <textarea
+                            rows={4}
+                            value={
+                              customEmailBody || generatedFormPreview.emailBody
+                            }
+                            onChange={(e) =>
+                              setCustomEmailBody(e.target.value)
+                            }
+                            className="w-full px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs"
+                          />
+                        </div>
+                      )}
+                  </div>
+                )}
+              </div>
+
               <label className="flex items-center gap-2 font-medium">
                 <input
                   type="checkbox"
@@ -2179,9 +2717,132 @@ export function LeadsCrmView() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-medium"
+                  className="px-4 py-2 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-medium inline-flex items-center gap-1.5"
                 >
-                  {editingLead ? "Save Changes" : "Create Lead"}
+                  {autoDmOnSave &&
+                    detectedModalChannels.some(
+                      (ch) => selectedAutoChannels[ch]
+                    ) && <Send className="w-3.5 h-3.5" />}
+                  {editingLead
+                    ? autoDmOnSave &&
+                      detectedModalChannels.some(
+                        (ch) => selectedAutoChannels[ch]
+                      )
+                      ? "Save & Auto-Send Personalized DM"
+                      : "Save Changes"
+                    : autoDmOnSave &&
+                      detectedModalChannels.some(
+                        (ch) => selectedAutoChannels[ch]
+                      )
+                    ? "Create Lead & Send Personalized DM"
+                    : "Create Lead"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK ADD SOCIALS & AUTO-SEND PERSONALIZED DM MODAL */}
+      {quickSocialLead && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl max-w-lg w-full p-6 space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
+              <div>
+                <h2 className="text-base font-semibold">
+                  Add Socials &amp; Send Personalized DM
+                </h2>
+                <p className="text-neutral-500">
+                  {quickSocialLead.businessName} (
+                  {quickSocialLead.contactPerson})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickSocialLead(null)}
+                className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickSocials} className="space-y-3.5">
+              <div>
+                <label className="block font-medium mb-1">
+                  Instagram Handle or URL
+                </label>
+                <input
+                  value={quickIgInput}
+                  onChange={(e) => setQuickIgInput(e.target.value)}
+                  placeholder="@brandname or https://instagram.com/brandname"
+                  className="w-full px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium mb-1">
+                  Business Email
+                </label>
+                <input
+                  type="email"
+                  value={quickEmailInput}
+                  onChange={(e) => setQuickEmailInput(e.target.value)}
+                  placeholder="founder@brand.com"
+                  className="w-full px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium mb-1">
+                  WhatsApp Phone Number
+                </label>
+                <input
+                  value={quickPhoneInput}
+                  onChange={(e) => setQuickPhoneInput(e.target.value)}
+                  placeholder="+1 415 555 0199 or +91 98765 43210"
+                  className="w-full px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950"
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1">
+                <div className="text-[11px] font-semibold text-neutral-700 dark:text-neutral-300 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  Auto-Personalized DM Preview:
+                </div>
+                <p className="text-[11px] text-neutral-500 whitespace-pre-line line-clamp-4">
+                  {
+                    buildPersonalizedOutreachMessages(
+                      {
+                        ...quickSocialLead,
+                        instagramUrl: quickIgInput,
+                        businessEmail: quickEmailInput,
+                        phoneNumber: quickPhoneInput,
+                      },
+                      db.templates,
+                      currentUser.name,
+                      db.settings.agencyName
+                    ).instagramMessage
+                  }
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => setQuickSocialLead(null)}
+                  className="px-4 py-2 rounded-lg border border-neutral-200 dark:border-neutral-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={quickSending}
+                  className="px-4 py-2 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-medium inline-flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {quickSending
+                    ? "Sending..."
+                    : "Save Socials & Send Personalized DM"}
                 </button>
               </div>
             </form>

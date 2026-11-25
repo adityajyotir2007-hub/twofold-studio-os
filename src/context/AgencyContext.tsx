@@ -33,7 +33,25 @@ import {
   CONNECTED_CALL_OUTCOMES,
   createDefaultProjectChecklist,
 } from "@/lib/constants";
+import {
+  AutoOutreachDispatchResponse,
+  detectNewlyAddedSocialChannels,
+  extractInstagramHandle,
+  formatInstagramProfileUrl,
+  SocialOutreachChannel,
+} from "@/lib/auto-outreach";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+
+export interface AutoOutreachTriggerOptions {
+  enabled?: boolean;
+  channels?: SocialOutreachChannel[];
+  customMessages?: {
+    instagramMessage?: string;
+    emailSubject?: string;
+    emailBody?: string;
+    whatsappMessage?: string;
+  };
+}
 
 interface ConvertLeadOptions {
   leadId: string;
@@ -102,8 +120,23 @@ interface AgencyContextValue {
   };
 
   // Leads
-  addLead: (lead: Omit<Lead, "id" | "internalNotes" | "history">) => Lead;
-  updateLead: (id: string, updates: Partial<Lead>) => void;
+  addLead: (
+    lead: Omit<Lead, "id" | "internalNotes" | "history">,
+    autoOutreach?: AutoOutreachTriggerOptions
+  ) => Lead;
+  updateLead: (
+    id: string,
+    updates: Partial<Lead>,
+    autoOutreach?: AutoOutreachTriggerOptions
+  ) => void;
+  sendLeadPersonalizedOutreach: (params: {
+    leadId: string;
+    lead?: Partial<Lead>;
+    channels?: SocialOutreachChannel[];
+    customMessages?: AutoOutreachTriggerOptions["customMessages"];
+  }) => Promise<AutoOutreachDispatchResponse | null>;
+  lastAutoOutreachResult: AutoOutreachDispatchResponse | null;
+  clearAutoOutreachResult: () => void;
   deleteLead: (id: string) => void;
   bulkUpdateLeads: (ids: string[], updates: Partial<Lead>) => void;
   bulkDeleteLeads: (ids: string[]) => void;
@@ -241,6 +274,12 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
   );
   const [globalSearchQuery, setGlobalSearchQuery] = useState<string>("");
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [lastAutoOutreachResult, setLastAutoOutreachResult] =
+    useState<AutoOutreachDispatchResponse | null>(null);
+
+  const clearAutoOutreachResult = useCallback(() => {
+    setLastAutoOutreachResult(null);
+  }, []);
 
   const refreshState = useCallback(async () => {
     try {
@@ -738,11 +777,75 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const sendLeadPersonalizedOutreach = useCallback(
+    async (params: {
+      leadId: string;
+      lead?: Partial<Lead>;
+      channels?: SocialOutreachChannel[];
+      customMessages?: AutoOutreachTriggerOptions["customMessages"];
+    }): Promise<AutoOutreachDispatchResponse | null> => {
+      try {
+        const res = await fetch("/api/integrations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "auto_outreach_lead",
+            leadId: params.leadId,
+            lead: params.lead,
+            channels: params.channels,
+            customMessages: params.customMessages,
+          }),
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as AutoOutreachDispatchResponse;
+        if (data.ok && data.results && data.results.length > 0) {
+          setLastAutoOutreachResult(data);
+        }
+        await refreshState();
+        return data;
+      } catch {
+        return null;
+      }
+    },
+    [refreshState]
+  );
+
   // LEADS CRUD
   const addLead = useCallback(
-    (leadInput: Omit<Lead, "id" | "internalNotes" | "history">) => {
+    (
+      leadInput: Omit<Lead, "id" | "internalNotes" | "history">,
+      autoOutreach?: AutoOutreachTriggerOptions
+    ) => {
+      const igHandle = extractInstagramHandle(
+        leadInput.instagramUrl || leadInput.instagramHandle
+      );
+      const normalizedInstagramUrl = igHandle
+        ? formatInstagramProfileUrl(leadInput.instagramUrl)
+        : leadInput.instagramUrl;
+
+      const detectedChannels = detectNewlyAddedSocialChannels(null, {
+        ...leadInput,
+        instagramUrl: normalizedInstagramUrl,
+        instagramHandle: igHandle,
+      });
+      const channelsToSend =
+        autoOutreach?.enabled === false
+          ? []
+          : autoOutreach?.channels ?? detectedChannels;
+
       const newLead: Lead = {
         ...leadInput,
+        instagramUrl: normalizedInstagramUrl,
+        instagramHandle: igHandle || undefined,
+        status:
+          channelsToSend.length > 0 &&
+          (leadInput.status === "New" || leadInput.status === "Qualified")
+            ? "Contacted"
+            : leadInput.status,
+        lastContacted:
+          channelsToSend.length > 0
+            ? todayDate()
+            : leadInput.lastContacted || "",
         id: `lead-${Date.now()}`,
         internalNotes: [],
         history: [
@@ -767,23 +870,73 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           section: "leads",
           entityId: newLead.id,
         },
+      }).then(() => {
+        if (channelsToSend.length > 0) {
+          sendLeadPersonalizedOutreach({
+            leadId: newLead.id,
+            lead: newLead,
+            channels: channelsToSend,
+            customMessages: autoOutreach?.customMessages,
+          });
+        }
       });
       return newLead;
     },
-    [apiCreateRecord, currentUser.name]
+    [apiCreateRecord, currentUser.name, sendLeadPersonalizedOutreach]
   );
 
   const updateLead = useCallback(
-    (id: string, updates: Partial<Lead>) => {
+    (
+      id: string,
+      updates: Partial<Lead>,
+      autoOutreach?: AutoOutreachTriggerOptions
+    ) => {
       const existing = db.leads.find((l) => l.id === id);
+
+      const patchedUpdates: Partial<Lead> = { ...updates };
+      if (updates.instagramUrl !== undefined) {
+        const igHandle = extractInstagramHandle(updates.instagramUrl);
+        patchedUpdates.instagramUrl = igHandle
+          ? formatInstagramProfileUrl(updates.instagramUrl)
+          : updates.instagramUrl;
+        patchedUpdates.instagramHandle = igHandle || undefined;
+      }
+
+      const mergedCandidate: Partial<Lead> = {
+        ...(existing || {}),
+        ...patchedUpdates,
+      };
+
+      const newlyAddedChannels = detectNewlyAddedSocialChannels(
+        existing,
+        mergedCandidate
+      );
+      const channelsToSend =
+        autoOutreach?.enabled === false
+          ? []
+          : autoOutreach?.channels ?? newlyAddedChannels;
+
+      if (
+        channelsToSend.length > 0 &&
+        existing &&
+        (mergedCandidate.status === "New" ||
+          mergedCandidate.status === "Qualified") &&
+        !updates.status
+      ) {
+        patchedUpdates.status = "Contacted";
+        patchedUpdates.lastContacted = todayDate();
+      }
+
       const statusChanged =
-        existing && updates.status && updates.status !== existing.status;
+        existing &&
+        patchedUpdates.status &&
+        patchedUpdates.status !== existing.status;
       const nextHistory = existing
         ? statusChanged
           ? [
               {
                 id: `lh-${Date.now()}`,
-                action: `Status updated from ${existing.status} to ${updates.status}`,
+                action: `Status updated from ${existing.status} to ${patchedUpdates.status}`,
                 actorName: currentUser.name,
                 timestamp: nowTimestamp(),
               },
@@ -793,8 +946,8 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
         : undefined;
 
       const finalUpdates = nextHistory
-        ? { ...updates, history: nextHistory }
-        : updates;
+        ? { ...patchedUpdates, history: nextHistory }
+        : patchedUpdates;
 
       setDb((prev) => ({
         ...prev,
@@ -807,11 +960,25 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
         entityType: "Lead",
         entityName: existing?.businessName || id,
         details: statusChanged
-          ? `Updated lead status to ${updates.status}.`
+          ? `Updated lead status to ${patchedUpdates.status}.`
           : `Updated lead profile.`,
+      }).then(() => {
+        if (channelsToSend.length > 0) {
+          sendLeadPersonalizedOutreach({
+            leadId: id,
+            lead: { ...(existing || {}), ...finalUpdates, id },
+            channels: channelsToSend,
+            customMessages: autoOutreach?.customMessages,
+          });
+        }
       });
     },
-    [apiUpdateRecord, currentUser.name, db.leads]
+    [
+      apiUpdateRecord,
+      currentUser.name,
+      db.leads,
+      sendLeadPersonalizedOutreach,
+    ]
   );
 
   const deleteLead = useCallback(
@@ -1682,6 +1849,9 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       permissions,
       addLead,
       updateLead,
+      sendLeadPersonalizedOutreach,
+      lastAutoOutreachResult,
+      clearAutoOutreachResult,
       deleteLead,
       bulkUpdateLeads,
       bulkDeleteLeads,
@@ -1753,6 +1923,9 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       permissions,
       addLead,
       updateLead,
+      sendLeadPersonalizedOutreach,
+      lastAutoOutreachResult,
+      clearAutoOutreachResult,
       deleteLead,
       bulkUpdateLeads,
       bulkDeleteLeads,

@@ -28,11 +28,18 @@ import {
 } from "@/lib/crypto-vault";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { normalizeEmail, normalizePhone } from "@/lib/validation";
+import { isValidEmail, normalizeEmail, normalizePhone } from "@/lib/validation";
+import {
+  AutoOutreachChannelResult,
+  buildDirectChannelLinks,
+  buildPersonalizedOutreachMessages,
+  SocialOutreachChannel,
+} from "@/lib/auto-outreach";
 import { realtimeBus } from "@/lib/realtime-bus";
 import {
   ColdCallRecord,
   IntegrationProviderId,
+  Lead,
   OutreachActivity,
   TeamInvitation,
   TeamMember,
@@ -771,6 +778,384 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 }
       );
+    }
+
+    // 9. Automated Personalized Multi-Channel Outreach on Lead Socials Added
+    if (action === "auto_outreach_lead") {
+      const db = readAgencyDb();
+      const leadId = String(body.leadId || "");
+      const incomingLead = (body.lead || {}) as Partial<Lead>;
+      const storedLead = db.leads.find((l) => l.id === leadId);
+      const mergedLead: Partial<Lead> = {
+        ...(storedLead || {}),
+        ...incomingLead,
+        id: storedLead?.id || leadId,
+      };
+
+      const requestedChannels = Array.isArray(body.channels)
+        ? (body.channels as SocialOutreachChannel[])
+        : (["instagram", "email", "whatsapp"] as SocialOutreachChannel[]);
+
+      const customMessages = (body.customMessages || {}) as {
+        instagramMessage?: string;
+        emailSubject?: string;
+        emailBody?: string;
+        whatsappMessage?: string;
+      };
+
+      const generated = buildPersonalizedOutreachMessages(
+        mergedLead,
+        db.templates || [],
+        actor.name,
+        db.settings?.agencyName || "Twofold Studio"
+      );
+
+      const finalMsgs = {
+        ...generated,
+        instagramMessage:
+          customMessages.instagramMessage?.trim() || generated.instagramMessage,
+        emailSubject:
+          customMessages.emailSubject?.trim() || generated.emailSubject,
+        emailBody: customMessages.emailBody?.trim() || generated.emailBody,
+        whatsappMessage:
+          customMessages.whatsappMessage?.trim() || generated.whatsappMessage,
+      };
+
+      const links = buildDirectChannelLinks(finalMsgs);
+      const nowDate = new Date().toISOString().slice(0, 10);
+      const nowTs = new Date().toISOString().slice(0, 16).replace("T", " ");
+      const followUpDate = new Date(Date.now() + 3 * 86400000)
+        .toISOString()
+        .slice(0, 10);
+
+      const results: AutoOutreachChannelResult[] = [];
+      const createdActivities: OutreachActivity[] = [];
+      const businessName = mergedLead.businessName || "Prospect";
+      const targetLeadId = mergedLead.id || leadId || `lead-${Date.now()}`;
+
+      // A. Instagram Personalized DM
+      if (
+        requestedChannels.includes("instagram") &&
+        finalMsgs.instagramHandle
+      ) {
+        let sentViaApi = false;
+        let providerMsgId: string | undefined;
+        let apiNote: string | undefined;
+
+        const igSecrets =
+          loadDecryptedIntegrationSecret<Record<string, string>>("instagram");
+        const igToken =
+          igSecrets?.accessToken || process.env.INSTAGRAM_ACCESS_TOKEN;
+        const igRecipientId = String(body.instagramScopedUserId || "").trim();
+
+        if (igToken && igRecipientId) {
+          try {
+            const igRes = await fetch(
+              "https://graph.facebook.com/v20.0/me/messages",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${igToken}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  recipient: { id: igRecipientId },
+                  message: { text: finalMsgs.instagramMessage },
+                }),
+              }
+            );
+            if (igRes.ok) {
+              const igData = (await igRes.json()) as { message_id?: string };
+              sentViaApi = true;
+              providerMsgId = igData.message_id || `ig-${Date.now()}`;
+            } else {
+              apiNote =
+                "Prepared personalized Instagram DM for 1-click @handle thread";
+            }
+          } catch {
+            apiNote =
+              "Prepared personalized Instagram DM for 1-click @handle thread";
+          }
+        }
+
+        const igOutreach: OutreachActivity = {
+          id: `out-ig-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          leadId: targetLeadId,
+          leadName: businessName,
+          memberId: actor.id,
+          communicationChannel: "Instagram DMs",
+          messageTemplateUsed: "Auto Personalized Instagram DM",
+          dateSent: nowDate,
+          occurredAt: nowTs,
+          messageContent: finalMsgs.instagramMessage,
+          direction: "Outbound",
+          source: sentViaApi ? "api" : "manual",
+          provider: "instagram",
+          providerMessageId: providerMsgId,
+          deliveryStatus: "sent",
+          replyStatus: "Message Sent",
+          replyDate: "",
+          nextFollowUpDate: followUpDate,
+          outcome: sentViaApi
+            ? `Auto-sent personalized Instagram DM via Meta Graph API (@${finalMsgs.instagramHandle})`
+            : `Personalized Instagram DM generated for @${finalMsgs.instagramHandle}`,
+          isDemo: false,
+        };
+        createdActivities.push(igOutreach);
+        results.push({
+          channel: "instagram",
+          label: "Instagram DM",
+          target: `@${finalMsgs.instagramHandle}`,
+          sentViaApi,
+          mode: sentViaApi ? "api" : "deep_link",
+          messagePreview: finalMsgs.instagramMessage,
+          launchUrl: links.instagramDmUrl,
+          secondaryUrl: links.instagramProfileUrl,
+          outreachId: igOutreach.id,
+          apiNote,
+        });
+      }
+
+      // B. Personalized Cold Email
+      if (
+        requestedChannels.includes("email") &&
+        isValidEmail(finalMsgs.emailAddress)
+      ) {
+        let sentViaApi = false;
+        let providerMsgId: string | undefined;
+        let providerThreadId: string | undefined;
+        let apiNote: string | undefined;
+
+        const gmailSecrets =
+          loadDecryptedIntegrationSecret<Record<string, string>>("gmail");
+        const gmailToken =
+          gmailSecrets?.accessToken || process.env.GMAIL_OAUTH_ACCESS_TOKEN;
+
+        if (gmailToken) {
+          try {
+            const rfc2822 = [
+              `To: ${finalMsgs.emailAddress}`,
+              `Subject: ${finalMsgs.emailSubject}`,
+              "Content-Type: text/plain; charset=utf-8",
+              "MIME-Version: 1.0",
+              "",
+              finalMsgs.emailBody,
+            ].join("\r\n");
+            const raw = Buffer.from(rfc2822, "utf-8").toString("base64url");
+            const gmailRes = await fetch(
+              "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${gmailToken}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ raw }),
+              }
+            );
+            if (gmailRes.ok) {
+              const sentData = (await gmailRes.json()) as {
+                id: string;
+                threadId: string;
+              };
+              sentViaApi = true;
+              providerMsgId = sentData.id;
+              providerThreadId = sentData.threadId;
+            } else {
+              apiNote = "Gmail token expired — ready for 1-click Gmail send";
+            }
+          } catch {
+            apiNote = "Gmail API unreachable — ready for 1-click Gmail send";
+          }
+        }
+
+        const emailOutreach: OutreachActivity = {
+          id: providerMsgId
+            ? `out-gmail-${providerMsgId}`
+            : `out-email-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          leadId: targetLeadId,
+          leadName: businessName,
+          memberId: actor.id,
+          communicationChannel: "Cold Emails",
+          messageTemplateUsed: "Auto Personalized Email",
+          subject: finalMsgs.emailSubject,
+          dateSent: nowDate,
+          occurredAt: nowTs,
+          messageContent: finalMsgs.emailBody,
+          direction: "Outbound",
+          source: sentViaApi ? "api" : "manual",
+          provider: "gmail",
+          providerMessageId: providerMsgId,
+          providerThreadId,
+          deliveryStatus: "sent",
+          replyStatus: "Message Sent",
+          replyDate: "",
+          nextFollowUpDate: followUpDate,
+          outcome: sentViaApi
+            ? `Auto-sent personalized email via Gmail API to ${finalMsgs.emailAddress}`
+            : `Personalized email generated for ${finalMsgs.emailAddress}`,
+          isDemo: false,
+        };
+        createdActivities.push(emailOutreach);
+        results.push({
+          channel: "email",
+          label: "Email",
+          target: finalMsgs.emailAddress,
+          sentViaApi,
+          mode: sentViaApi ? "api" : "deep_link",
+          subject: finalMsgs.emailSubject,
+          messagePreview: finalMsgs.emailBody,
+          launchUrl: links.gmailComposeUrl,
+          secondaryUrl: links.mailtoUrl,
+          outreachId: emailOutreach.id,
+          apiNote,
+        });
+      }
+
+      // C. Personalized WhatsApp Message
+      if (
+        requestedChannels.includes("whatsapp") &&
+        finalMsgs.whatsappPhone.length >= 7
+      ) {
+        let sentViaApi = false;
+        let providerMsgId: string | undefined;
+        let apiNote: string | undefined;
+
+        const waSecrets =
+          loadDecryptedIntegrationSecret<Record<string, string>>("whatsapp");
+        const waToken =
+          waSecrets?.accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+        const waPhoneId =
+          waSecrets?.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+        if (waToken && waPhoneId) {
+          try {
+            const waRes = await fetch(
+              `https://graph.facebook.com/v20.0/${encodeURIComponent(
+                waPhoneId
+              )}/messages`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${waToken}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  messaging_product: "whatsapp",
+                  to: finalMsgs.whatsappPhone,
+                  type: "text",
+                  text: {
+                    preview_url: true,
+                    body: finalMsgs.whatsappMessage,
+                  },
+                }),
+              }
+            );
+            if (waRes.ok) {
+              const waJson = (await waRes.json()) as {
+                messages?: { id: string }[];
+              };
+              sentViaApi = true;
+              providerMsgId = waJson.messages?.[0]?.id || `wamid.${Date.now()}`;
+            } else {
+              apiNote =
+                "WhatsApp API requires 24h session or template — ready for 1-click WhatsApp send";
+            }
+          } catch {
+            apiNote = "Prepared for 1-click WhatsApp send";
+          }
+        }
+
+        const waOutreach: OutreachActivity = {
+          id: `out-wa-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          leadId: targetLeadId,
+          leadName: businessName,
+          memberId: actor.id,
+          communicationChannel: "WhatsApp Messages",
+          messageTemplateUsed: "Auto Personalized WhatsApp DM",
+          dateSent: nowDate,
+          occurredAt: nowTs,
+          messageContent: finalMsgs.whatsappMessage,
+          direction: "Outbound",
+          source: sentViaApi ? "api" : "manual",
+          provider: "whatsapp_cloud",
+          providerMessageId: providerMsgId,
+          deliveryStatus: "sent",
+          replyStatus: "Message Sent",
+          replyDate: "",
+          nextFollowUpDate: followUpDate,
+          outcome: sentViaApi
+            ? `Auto-sent personalized WhatsApp message via Cloud API (+${finalMsgs.whatsappPhone})`
+            : `Personalized WhatsApp DM generated for +${finalMsgs.whatsappPhone}`,
+          isDemo: false,
+        };
+        createdActivities.push(waOutreach);
+        results.push({
+          channel: "whatsapp",
+          label: "WhatsApp",
+          target: `+${finalMsgs.whatsappPhone}`,
+          sentViaApi,
+          mode: sentViaApi ? "api" : "deep_link",
+          messagePreview: finalMsgs.whatsappMessage,
+          launchUrl: links.whatsappUrl,
+          outreachId: waOutreach.id,
+          apiNote,
+        });
+      }
+
+      if (createdActivities.length > 0) {
+        // Reload freshest DB right before write so concurrent lead creation is preserved
+        const freshDb = readAgencyDb();
+        freshDb.outreach = [...createdActivities, ...(freshDb.outreach || [])];
+
+        const channelNames = results.map((r) => r.label).join(", ");
+        freshDb.leads = (freshDb.leads || []).map((l) => {
+          if (l.id !== targetLeadId) return l;
+          const nextStatus =
+            l.status === "New" || l.status === "Qualified"
+              ? "Contacted"
+              : l.status;
+          return {
+            ...l,
+            status: nextStatus,
+            lastContacted: nowDate,
+            instagramHandle: finalMsgs.instagramHandle || l.instagramHandle,
+            history: [
+              {
+                id: `lh-auto-${Date.now()}`,
+                action: `Auto-sent personalized outreach via ${channelNames}`,
+                actorName: actor.name,
+                timestamp: nowTs,
+              },
+              ...(l.history || []),
+            ],
+          };
+        });
+
+        appendAuditAndNotification(freshDb, {
+          actorId: actor.id,
+          actorName: actor.name,
+          action: "recorded",
+          entityType: "Auto-Outreach",
+          entityName: businessName,
+          details: `Triggered personalized outreach across ${channelNames} for ${businessName}.`,
+        });
+
+        writeAgencyDb(freshDb);
+        realtimeBus.emit({
+          table: "outreach",
+          action: "INSERT",
+          recordId: targetLeadId,
+          actorId: actor.id,
+        });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        leadId: targetLeadId,
+        businessName,
+        results,
+      });
     }
 
     return NextResponse.json(
