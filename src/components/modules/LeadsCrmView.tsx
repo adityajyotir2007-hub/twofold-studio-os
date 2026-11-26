@@ -343,7 +343,7 @@ export function LeadsCrmView() {
         businessEmail: quickEmailInput.trim(),
         phoneNumber: quickPhoneInput.trim(),
         whatsappOptIn:
-          cleanWhatsAppPhone(quickPhoneInput).length >= 7
+          cleanWhatsAppPhone(quickPhoneInput).length >= 5
             ? true
             : quickSocialLead.whatsappOptIn,
       };
@@ -357,7 +357,7 @@ export function LeadsCrmView() {
         fallbackAllChannels.push("instagram");
       if (updates.businessEmail && isValidEmail(updates.businessEmail))
         fallbackAllChannels.push("email");
-      if (cleanWhatsAppPhone(updates.phoneNumber).length >= 7)
+      if (cleanWhatsAppPhone(updates.phoneNumber).length >= 5)
         fallbackAllChannels.push("whatsapp");
 
       const targetChannels =
@@ -423,7 +423,7 @@ export function LeadsCrmView() {
       contactPerson: formState.contactPerson.trim() || "Founder",
       whatsappOptIn:
         formState.whatsappOptIn ||
-        cleanWhatsAppPhone(formState.phoneNumber).length >= 7,
+        cleanWhatsAppPhone(formState.phoneNumber).length >= 5,
     };
     const activeChannels = detectedModalChannels.filter(
       (ch) => selectedAutoChannels[ch]
@@ -835,117 +835,166 @@ export function LeadsCrmView() {
         </div>
       )}
 
-      {/* AUTO-PERSONALIZED DM & OUTREACH DISPATCH BANNER */}
+      {/* CENTERED AUTO-PERSONALIZED DM & OUTREACH DISPATCH MODAL */}
       {lastAutoOutreachResult && lastAutoOutreachResult.results.length > 0 && (
-        <div className="p-4 rounded-xl bg-white dark:bg-neutral-900 border-2 border-emerald-500/50 dark:border-emerald-500/40 shadow-sm space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                <Send className="w-3.5 h-3.5" />
+        <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-xl space-y-4">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-neutral-200 dark:border-neutral-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Send className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    Personalized DM Ready for{" "}
+                    {lastAutoOutreachResult.businessName}
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    Logged to Unified Timeline &amp; marked{" "}
+                    <span className="font-medium text-neutral-700 dark:text-neutral-300">
+                      Contacted
+                    </span>
+                    . Click below to launch each channel with your personalized
+                    message pre-filled.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">
-                  Personalized Outreach Generated for{" "}
-                  {lastAutoOutreachResult.businessName}
-                </h3>
-                <p className="text-[11px] text-neutral-500">
-                  Logged to Unified Timeline &amp; CRM status updated to{" "}
-                  <span className="font-medium text-neutral-700 dark:text-neutral-300">
-                    Contacted
-                  </span>
-                  . Connected APIs send automatically; use 1-click buttons below
-                  to launch direct app threads.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={clearAutoOutreachResult}
-              className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400"
-              title="Dismiss"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-            {lastAutoOutreachResult.results.map((item) => (
-              <div
-                key={item.outreachId}
-                className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 flex flex-col justify-between gap-2.5 text-xs"
+              <button
+                type="button"
+                onClick={clearAutoOutreachResult}
+                className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400"
+                title="Close"
               >
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-1.5">
-                    <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {lastAutoOutreachResult.results.map((item) => (
+                <div
+                  key={item.outreachId}
+                  className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-2.5 text-xs"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-semibold text-neutral-900 dark:text-neutral-100 text-xs">
                       {item.label} ·{" "}
                       <span className="font-normal text-neutral-500">
                         {item.target}
                       </span>
-                    </span>
+                    </div>
                     <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
                         item.sentViaApi
                           ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                           : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
                       }`}
                     >
-                      {item.sentViaApi ? "Sent via API" : "Ready · Logged"}
+                      {item.sentViaApi
+                        ? "✓ Sent Automatically via API"
+                        : "Logged · Ready for 1-Click Send"}
                     </span>
                   </div>
+
                   {item.subject && (
-                    <div className="text-[11px] font-medium text-neutral-700 dark:text-neutral-300 truncate">
+                    <div className="text-xs font-medium text-neutral-800 dark:text-neutral-200">
                       Subject: {item.subject}
                     </div>
                   )}
-                  <p className="text-[11px] text-neutral-500 line-clamp-3 whitespace-pre-line">
+
+                  <div className="p-3 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200/70 dark:border-neutral-800 text-xs text-neutral-700 dark:text-neutral-300 whitespace-pre-line max-h-36 overflow-y-auto">
                     {item.messagePreview}
-                  </p>
-                </div>
+                  </div>
 
-                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-neutral-200/60 dark:border-neutral-800">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      copyTextWithFeedback(item.outreachId, item.messagePreview)
-                    }
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-[11px] font-medium"
-                  >
-                    {copiedKey === item.outreachId ? (
-                      <>
-                        <Check className="w-3 h-3 text-emerald-600" /> Copied DM
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3 h-3" /> Copy DM
-                      </>
-                    )}
-                  </button>
-
-                  {item.launchUrl && (
-                    <a
-                      href={item.launchUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={() => {
-                        if (item.channel === "instagram") {
-                          navigator.clipboard
-                            ?.writeText(item.messagePreview)
-                            .catch(() => {});
-                        }
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:opacity-90 text-[11px] font-medium"
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        copyTextWithFeedback(
+                          item.outreachId,
+                          item.messagePreview
+                        )
+                      }
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-medium"
                     >
-                      {item.channel === "instagram"
-                        ? "Copy & Open IG DM"
-                        : item.channel === "whatsapp"
-                        ? "Send on WhatsApp"
-                        : "Open in Gmail"}{" "}
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+                      {copiedKey === item.outreachId ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />{" "}
+                          Copied Message!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" /> Copy Personalized DM
+                        </>
+                      )}
+                    </button>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {item.secondaryUrl && item.channel === "email" && (
+                        <a
+                          href={item.secondaryUrl}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-medium"
+                        >
+                          Mail App <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                      {item.launchUrl && (
+                        <a
+                          href={item.launchUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => {
+                            if (item.channel === "instagram") {
+                              copyTextWithFeedback(
+                                item.outreachId,
+                                item.messagePreview
+                              );
+                            }
+                          }}
+                          className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-white text-xs font-semibold shadow-2xs transition ${
+                            item.channel === "whatsapp"
+                              ? "bg-emerald-600 hover:bg-emerald-500"
+                              : item.channel === "instagram"
+                              ? "bg-pink-600 hover:bg-pink-500"
+                              : "bg-blue-600 hover:bg-blue-500"
+                          }`}
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          {item.channel === "instagram"
+                            ? `Copy DM & Open Instagram (${item.target})`
+                            : item.channel === "whatsapp"
+                            ? "Send Personalized WhatsApp DM"
+                            : "Open Pre-Filled Gmail"}{" "}
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-neutral-200 dark:border-neutral-800 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetLead = db.leads.find(
+                    (l) => l.id === lastAutoOutreachResult.leadId
+                  );
+                  clearAutoOutreachResult();
+                  if (targetLead) openQuickSocialModal(targetLead);
+                }}
+                className="text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white font-medium inline-flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add / Edit More Social Channels
+              </button>
+              <button
+                type="button"
+                onClick={clearAutoOutreachResult}
+                className="px-4 py-2 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-medium"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1205,7 +1254,7 @@ export function LeadsCrmView() {
                                 )}
                               </span>
                             )}
-                            {cleanWhatsAppPhone(lead.phoneNumber).length >= 7 && (
+                            {cleanWhatsAppPhone(lead.phoneNumber).length >= 5 && (
                               <span className="inline-flex items-center px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 text-[10px] font-medium">
                                 WA: {lead.phoneNumber}
                               </span>
@@ -1312,7 +1361,7 @@ export function LeadsCrmView() {
                                       isValidEmail(lead.businessEmail)
                                   ) ||
                                   cleanWhatsAppPhone(lead.phoneNumber).length >=
-                                    7;
+                                    5;
                                 if (!hasAnySocial) {
                                   openQuickSocialModal(lead);
                                   return;
@@ -1600,7 +1649,7 @@ export function LeadsCrmView() {
                           )
                         </button>
                       )}
-                      {cleanWhatsAppPhone(activeLead.phoneNumber).length >= 7 && (
+                      {cleanWhatsAppPhone(activeLead.phoneNumber).length >= 5 && (
                         <button
                           type="button"
                           onClick={() =>

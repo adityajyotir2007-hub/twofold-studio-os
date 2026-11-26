@@ -1015,7 +1015,7 @@ export async function POST(req: NextRequest) {
       // C. Personalized WhatsApp Message
       if (
         requestedChannels.includes("whatsapp") &&
-        finalMsgs.whatsappPhone.length >= 7
+        finalMsgs.whatsappPhone.length >= 5
       ) {
         let sentViaApi = false;
         let providerMsgId: string | undefined;
@@ -1109,28 +1109,61 @@ export async function POST(req: NextRequest) {
         freshDb.outreach = [...createdActivities, ...(freshDb.outreach || [])];
 
         const channelNames = results.map((r) => r.label).join(", ");
-        freshDb.leads = (freshDb.leads || []).map((l) => {
-          if (l.id !== targetLeadId) return l;
-          const nextStatus =
-            l.status === "New" || l.status === "Qualified"
-              ? "Contacted"
-              : l.status;
-          return {
-            ...l,
-            status: nextStatus,
-            lastContacted: nowDate,
-            instagramHandle: finalMsgs.instagramHandle || l.instagramHandle,
-            history: [
-              {
-                id: `lh-auto-${Date.now()}`,
-                action: `Auto-sent personalized outreach via ${channelNames}`,
-                actorName: actor.name,
-                timestamp: nowTs,
-              },
-              ...(l.history || []),
-            ],
-          };
-        });
+        const leadExistsInContainer = (freshDb.leads || []).some(
+          (l) => l.id === targetLeadId
+        );
+        if (!leadExistsInContainer && mergedLead.businessName) {
+          freshDb.leads = [
+            {
+              ...(mergedLead as Lead),
+              id: targetLeadId,
+              status:
+                !mergedLead.status ||
+                mergedLead.status === "New" ||
+                mergedLead.status === "Qualified"
+                  ? "Contacted"
+                  : mergedLead.status,
+              lastContacted: nowDate,
+              instagramHandle:
+                finalMsgs.instagramHandle || mergedLead.instagramHandle,
+              internalNotes: mergedLead.internalNotes || [],
+              history: [
+                {
+                  id: `lh-auto-${Date.now()}`,
+                  action: `Auto-sent personalized outreach via ${channelNames}`,
+                  actorName: actor.name,
+                  timestamp: nowTs,
+                },
+                ...(mergedLead.history || []),
+              ],
+              isDemo: false,
+            },
+            ...(freshDb.leads || []),
+          ];
+        } else {
+          freshDb.leads = (freshDb.leads || []).map((l) => {
+            if (l.id !== targetLeadId) return l;
+            const nextStatus =
+              l.status === "New" || l.status === "Qualified"
+                ? "Contacted"
+                : l.status;
+            return {
+              ...l,
+              status: nextStatus,
+              lastContacted: nowDate,
+              instagramHandle: finalMsgs.instagramHandle || l.instagramHandle,
+              history: [
+                {
+                  id: `lh-auto-${Date.now()}`,
+                  action: `Auto-sent personalized outreach via ${channelNames}`,
+                  actorName: actor.name,
+                  timestamp: nowTs,
+                },
+                ...(l.history || []),
+              ],
+            };
+          });
+        }
 
         appendAuditAndNotification(freshDb, {
           actorId: actor.id,

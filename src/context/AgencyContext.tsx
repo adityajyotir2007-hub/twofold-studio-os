@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -35,6 +36,7 @@ import {
 } from "@/lib/constants";
 import {
   AutoOutreachDispatchResponse,
+  buildClientAutoOutreachDispatch,
   detectNewlyAddedSocialChannels,
   extractInstagramHandle,
   formatInstagramProfileUrl,
@@ -259,6 +261,83 @@ function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+const LOCAL_CACHE_KEY = "twofold_workspace_cache_v2";
+const LOCAL_DELETED_KEY = "twofold_deleted_ids_v2";
+
+const MERGEABLE_COLLECTIONS = [
+  "leads",
+  "outreach",
+  "coldCalls",
+  "campaigns",
+  "clients",
+  "projects",
+  "tasks",
+  "finance",
+  "payments",
+  "documents",
+  "templates",
+] as const;
+
+function mergeServerAndLocalState(
+  server: AgencyDatabaseState,
+  local: AgencyDatabaseState,
+  deletedIds: Set<string>
+): {
+  merged: AgencyDatabaseState;
+  missingOnServer: Partial<Record<string, { id: string }[]>>;
+} {
+  const merged: AgencyDatabaseState = { ...server };
+  const missingOnServer: Partial<Record<string, { id: string }[]>> = {};
+
+  for (const key of MERGEABLE_COLLECTIONS) {
+    const serverArr = (
+      (server[key] as unknown as { id: string }[]) || []
+    ).filter((item) => item && !deletedIds.has(item.id));
+    const localArr = (
+      (local[key] as unknown as { id: string }[]) || []
+    ).filter((item) => item && !deletedIds.has(item.id));
+
+    const serverMap = new Map(serverArr.map((item) => [item.id, item]));
+    const missing: { id: string }[] = [];
+
+    for (const localItem of localArr) {
+      if (!serverMap.has(localItem.id)) {
+        // Avoid duplicating local optimistic outreach if server created an API outreach for same lead & channel
+        if (key === "outreach") {
+          const lo = localItem as unknown as OutreachActivity;
+          const alreadySyncedOnServer = (server.outreach || []).some(
+            (so) =>
+              so.leadId === lo.leadId &&
+              so.communicationChannel === lo.communicationChannel &&
+              so.dateSent === lo.dateSent &&
+              so.messageContent === lo.messageContent
+          );
+          if (alreadySyncedOnServer) continue;
+        }
+        missing.push(localItem);
+      } else if (key === "leads") {
+        // Keep whichever lead version has richer/newer history or social fields
+        const sLead = serverMap.get(localItem.id) as unknown as Lead;
+        const lLead = localItem as unknown as Lead;
+        if ((lLead.history?.length || 0) > (sLead.history?.length || 0)) {
+          serverMap.set(localItem.id, localItem);
+        }
+      }
+    }
+
+    if (missing.length > 0) {
+      missingOnServer[key] = missing;
+    }
+
+    (merged[key] as unknown as { id: string }[]) = [
+      ...missing,
+      ...Array.from(serverMap.values()),
+    ];
+  }
+
+  return { merged, missingOnServer };
+}
+
 export function AgencyProvider({ children }: { children: React.ReactNode }) {
   const [db, setDb] = useState<AgencyDatabaseState>(INITIAL_AGENCY_DATA);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -277,6 +356,68 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
   const [lastAutoOutreachResult, setLastAutoOutreachResult] =
     useState<AutoOutreachDispatchResponse | null>(null);
 
+  const dbRef = useRef<AgencyDatabaseState>(INITIAL_AGENCY_DATA);
+  const deletedIdsRef = useRef<Set<string>>(new Set());
+  const hydratedCacheRef = useRef<boolean>(false);
+
+  const markIdsDeleted = useCallback((ids: string[]) => {
+    for (const id of ids) {
+      if (id) deletedIdsRef.current.add(id);
+    }
+    try {
+      window.localStorage.setItem(
+        LOCAL_DELETED_KEY,
+        JSON.stringify(Array.from(deletedIdsRef.current).slice(-500))
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  // Load cached workspace records on mount so cold Vercel serverless containers never wipe user data
+  useEffect(() => {
+    try {
+      const rawDeleted = window.localStorage.getItem(LOCAL_DELETED_KEY);
+      if (rawDeleted) {
+        const parsedDel = JSON.parse(rawDeleted) as string[];
+        if (Array.isArray(parsedDel)) {
+          deletedIdsRef.current = new Set(parsedDel);
+        }
+      }
+      const rawCache = window.localStorage.getItem(LOCAL_CACHE_KEY);
+      if (rawCache) {
+        const cachedDb = JSON.parse(rawCache) as AgencyDatabaseState;
+        if (cachedDb && Array.isArray(cachedDb.leads)) {
+          dbRef.current = cachedDb;
+          setDb((prev) => {
+            const { merged } = mergeServerAndLocalState(
+              prev,
+              cachedDb,
+              deletedIdsRef.current
+            );
+            dbRef.current = merged;
+            return merged;
+          });
+        }
+      }
+    } catch {
+      // ignore cache parse errors
+    } finally {
+      hydratedCacheRef.current = true;
+    }
+  }, []);
+
+  // Persist workspace state snapshot locally whenever db changes
+  useEffect(() => {
+    dbRef.current = db;
+    if (!hydratedCacheRef.current) return;
+    try {
+      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(db));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [db]);
+
   const clearAutoOutreachResult = useCallback(() => {
     setLastAutoOutreachResult(null);
   }, []);
@@ -287,7 +428,29 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       if (res.ok) {
         const serverData = (await res.json()) as AgencyDatabaseState;
         if (serverData && serverData.teamMembers) {
-          setDb(serverData);
+          let missingToSync: Partial<Record<string, { id: string }[]>> = {};
+          setDb((prev) => {
+            const { merged, missingOnServer } = mergeServerAndLocalState(
+              serverData,
+              prev,
+              deletedIdsRef.current
+            );
+            missingToSync = missingOnServer;
+            dbRef.current = merged;
+            return merged;
+          });
+
+          if (Object.keys(missingToSync).length > 0) {
+            fetch("/api/transactions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "rehydrate_records",
+                collections: missingToSync,
+                deletedIds: Array.from(deletedIdsRef.current),
+              }),
+            }).catch(() => {});
+          }
         }
       }
     } catch {
@@ -475,6 +638,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
 
   const apiDeleteRecord = useCallback(
     async (collection: string, id: string) => {
+      markIdsDeleted([id]);
       await fetch(
         `/api/transactions?__collection=${encodeURIComponent(
           collection
@@ -485,7 +649,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       );
       await refreshState();
     },
-    [refreshState]
+    [markIdsDeleted, refreshState]
   );
 
   // AUTH OPERATIONS
@@ -784,6 +948,58 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       channels?: SocialOutreachChannel[];
       customMessages?: AutoOutreachTriggerOptions["customMessages"];
     }): Promise<AutoOutreachDispatchResponse | null> => {
+      const currentDb = dbRef.current;
+      const existingLead = currentDb.leads.find((l) => l.id === params.leadId);
+      const mergedLead: Partial<Lead> = {
+        ...(existingLead || {}),
+        ...(params.lead || {}),
+        id: params.leadId,
+      };
+
+      // 1. Instant 0ms client-side generation & optimistic state update so modal opens immediately
+      const immediate = buildClientAutoOutreachDispatch({
+        leadId: params.leadId,
+        lead: mergedLead,
+        channels: params.channels,
+        templates: currentDb.templates || [],
+        actorId: currentUser.id,
+        senderName: currentUser.name,
+        agencyName: currentDb.settings?.agencyName || "Twofold Studio",
+        customMessages: params.customMessages,
+      });
+
+      if (immediate.response.results.length > 0) {
+        setLastAutoOutreachResult(immediate.response);
+        const channelLabels = immediate.response.results
+          .map((r) => r.label)
+          .join(", ");
+        setDb((prev) => ({
+          ...prev,
+          outreach: [...immediate.activities, ...prev.outreach],
+          leads: prev.leads.map((l) => {
+            if (l.id !== params.leadId) return l;
+            return {
+              ...l,
+              status:
+                l.status === "New" || l.status === "Qualified"
+                  ? "Contacted"
+                  : l.status,
+              lastContacted: todayDate(),
+              history: [
+                {
+                  id: `lh-auto-${Date.now()}`,
+                  action: `Prepared personalized outreach via ${channelLabels}`,
+                  actorName: currentUser.name,
+                  timestamp: nowTimestamp(),
+                },
+                ...(l.history || []),
+              ],
+            };
+          }),
+        }));
+      }
+
+      // 2. Background server sync & live API send (if Gmail / WhatsApp Cloud API connected)
       try {
         const res = await fetch("/api/integrations", {
           method: "POST",
@@ -791,23 +1007,22 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           body: JSON.stringify({
             action: "auto_outreach_lead",
             leadId: params.leadId,
-            lead: params.lead,
+            lead: mergedLead,
             channels: params.channels,
             customMessages: params.customMessages,
           }),
         });
-        if (!res.ok) return null;
-        const data = (await res.json()) as AutoOutreachDispatchResponse;
-        if (data.ok && data.results && data.results.length > 0) {
-          setLastAutoOutreachResult(data);
+        if (!res.ok) return immediate.response;
+        const serverRes = (await res.json()) as AutoOutreachDispatchResponse;
+        if (serverRes.ok && serverRes.results && serverRes.results.length > 0) {
+          setLastAutoOutreachResult(serverRes);
         }
-        await refreshState();
-        return data;
+        return serverRes;
       } catch {
-        return null;
+        return immediate.response;
       }
     },
-    [refreshState]
+    [currentUser.id, currentUser.name]
   );
 
   // LEADS CRUD
@@ -1009,6 +1224,11 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
 
   const bulkDeleteLeads = useCallback(
     (ids: string[]) => {
+      markIdsDeleted(ids);
+      setDb((prev) => ({
+        ...prev,
+        leads: prev.leads.filter((l) => !ids.includes(l.id)),
+      }));
       fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1018,7 +1238,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
         }),
       }).then(() => refreshState());
     },
-    [refreshState]
+    [markIdsDeleted, refreshState]
   );
 
   const addLeadNote = useCallback(

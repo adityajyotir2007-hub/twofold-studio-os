@@ -1,4 +1,4 @@
-import { AgencyTemplate, Lead } from "@/types/agency";
+import { AgencyTemplate, Lead, OutreachActivity } from "@/types/agency";
 import { isValidEmail, normalizeEmail, normalizePhone } from "./validation";
 
 export type SocialOutreachChannel = "instagram" | "email" | "whatsapp";
@@ -198,7 +198,7 @@ export function buildDirectChannelLinks(msgs: PersonalizedLeadMessages) {
     ? `https://instagram.com/${encodeURIComponent(msgs.instagramHandle)}`
     : "";
   const whatsappUrl =
-    msgs.whatsappPhone.length >= 7
+    msgs.whatsappPhone.length >= 5
       ? `https://wa.me/${msgs.whatsappPhone}?text=${encodeURIComponent(
           msgs.whatsappMessage
         )}`
@@ -255,9 +255,186 @@ export function detectNewlyAddedSocialChannels(
 
   const nextPhone = cleanWhatsAppPhone(nextLead.phoneNumber);
   const prevPhone = prevLead ? cleanWhatsAppPhone(prevLead.phoneNumber) : "";
-  if (nextPhone.length >= 7 && nextPhone !== prevPhone) {
+  if (nextPhone.length >= 5 && nextPhone !== prevPhone) {
     channels.push("whatsapp");
   }
 
   return channels;
+}
+
+/**
+ * Builds an instant client-side AutoOutreachDispatchResponse and OutreachActivity[]
+ * in 0ms so the UI opens the Personalized Auto-DM modal immediately without waiting
+ * on serverless cold starts.
+ */
+export function buildClientAutoOutreachDispatch(params: {
+  leadId: string;
+  lead: Partial<Lead>;
+  channels?: SocialOutreachChannel[];
+  templates: AgencyTemplate[];
+  actorId: string;
+  senderName: string;
+  agencyName?: string;
+  customMessages?: {
+    instagramMessage?: string;
+    emailSubject?: string;
+    emailBody?: string;
+    whatsappMessage?: string;
+  };
+}): {
+  response: AutoOutreachDispatchResponse;
+  activities: OutreachActivity[];
+} {
+  const generated = buildPersonalizedOutreachMessages(
+    params.lead,
+    params.templates,
+    params.senderName,
+    params.agencyName || "Twofold Studio"
+  );
+
+  const finalMsgs: PersonalizedLeadMessages = {
+    ...generated,
+    instagramMessage:
+      params.customMessages?.instagramMessage?.trim() ||
+      generated.instagramMessage,
+    emailSubject:
+      params.customMessages?.emailSubject?.trim() || generated.emailSubject,
+    emailBody:
+      params.customMessages?.emailBody?.trim() || generated.emailBody,
+    whatsappMessage:
+      params.customMessages?.whatsappMessage?.trim() ||
+      generated.whatsappMessage,
+  };
+
+  const links = buildDirectChannelLinks(finalMsgs);
+  const requested: SocialOutreachChannel[] =
+    params.channels && params.channels.length > 0
+      ? params.channels
+      : ["instagram", "email", "whatsapp"];
+
+  const nowDate = new Date().toISOString().slice(0, 10);
+  const nowTs = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const followUpDate = new Date(Date.now() + 3 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const businessName = params.lead.businessName || "Prospect";
+
+  const results: AutoOutreachChannelResult[] = [];
+  const activities: OutreachActivity[] = [];
+
+  if (requested.includes("instagram") && finalMsgs.instagramHandle) {
+    const id = `out-ig-local-${Date.now()}`;
+    activities.push({
+      id,
+      leadId: params.leadId,
+      leadName: businessName,
+      memberId: params.actorId,
+      communicationChannel: "Instagram DMs",
+      messageTemplateUsed: "Auto Personalized Instagram DM",
+      dateSent: nowDate,
+      occurredAt: nowTs,
+      messageContent: finalMsgs.instagramMessage,
+      direction: "Outbound",
+      source: "manual",
+      provider: "instagram",
+      deliveryStatus: "sent",
+      replyStatus: "Message Sent",
+      replyDate: "",
+      nextFollowUpDate: followUpDate,
+      outcome: `Personalized Instagram DM prepared for @${finalMsgs.instagramHandle}`,
+      isDemo: false,
+    });
+    results.push({
+      channel: "instagram",
+      label: "Instagram DM",
+      target: `@${finalMsgs.instagramHandle}`,
+      sentViaApi: false,
+      mode: "deep_link",
+      messagePreview: finalMsgs.instagramMessage,
+      launchUrl: links.instagramDmUrl,
+      secondaryUrl: links.instagramProfileUrl,
+      outreachId: id,
+    });
+  }
+
+  if (requested.includes("email") && isValidEmail(finalMsgs.emailAddress)) {
+    const id = `out-email-local-${Date.now()}`;
+    activities.push({
+      id,
+      leadId: params.leadId,
+      leadName: businessName,
+      memberId: params.actorId,
+      communicationChannel: "Cold Emails",
+      messageTemplateUsed: "Auto Personalized Email",
+      subject: finalMsgs.emailSubject,
+      dateSent: nowDate,
+      occurredAt: nowTs,
+      messageContent: finalMsgs.emailBody,
+      direction: "Outbound",
+      source: "manual",
+      provider: "gmail",
+      deliveryStatus: "sent",
+      replyStatus: "Message Sent",
+      replyDate: "",
+      nextFollowUpDate: followUpDate,
+      outcome: `Personalized email prepared for ${finalMsgs.emailAddress}`,
+      isDemo: false,
+    });
+    results.push({
+      channel: "email",
+      label: "Email",
+      target: finalMsgs.emailAddress,
+      sentViaApi: false,
+      mode: "deep_link",
+      subject: finalMsgs.emailSubject,
+      messagePreview: finalMsgs.emailBody,
+      launchUrl: links.gmailComposeUrl,
+      secondaryUrl: links.mailtoUrl,
+      outreachId: id,
+    });
+  }
+
+  if (requested.includes("whatsapp") && finalMsgs.whatsappPhone.length >= 5) {
+    const id = `out-wa-local-${Date.now()}`;
+    activities.push({
+      id,
+      leadId: params.leadId,
+      leadName: businessName,
+      memberId: params.actorId,
+      communicationChannel: "WhatsApp Messages",
+      messageTemplateUsed: "Auto Personalized WhatsApp DM",
+      dateSent: nowDate,
+      occurredAt: nowTs,
+      messageContent: finalMsgs.whatsappMessage,
+      direction: "Outbound",
+      source: "manual",
+      provider: "whatsapp_cloud",
+      deliveryStatus: "sent",
+      replyStatus: "Message Sent",
+      replyDate: "",
+      nextFollowUpDate: followUpDate,
+      outcome: `Personalized WhatsApp DM prepared for +${finalMsgs.whatsappPhone}`,
+      isDemo: false,
+    });
+    results.push({
+      channel: "whatsapp",
+      label: "WhatsApp",
+      target: `+${finalMsgs.whatsappPhone}`,
+      sentViaApi: false,
+      mode: "deep_link",
+      messagePreview: finalMsgs.whatsappMessage,
+      launchUrl: links.whatsappUrl,
+      outreachId: id,
+    });
+  }
+
+  return {
+    response: {
+      ok: true,
+      leadId: params.leadId,
+      businessName,
+      results,
+    },
+    activities,
+  };
 }

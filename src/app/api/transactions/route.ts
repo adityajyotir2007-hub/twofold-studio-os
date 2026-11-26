@@ -719,6 +719,64 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (type === "rehydrate_records") {
+      const db = readAgencyDb();
+      const collectionsPayload = (body.collections || {}) as Partial<
+        Record<CollectionName, { id: string }[]>
+      >;
+      const deletedSet = new Set<string>(
+        Array.isArray(body.deletedIds) ? (body.deletedIds as string[]) : []
+      );
+      const syncableKeys: CollectionName[] = [
+        "leads",
+        "outreach",
+        "coldCalls",
+        "campaigns",
+        "clients",
+        "projects",
+        "tasks",
+        "finance",
+        "payments",
+        "documents",
+        "templates",
+      ];
+
+      let changed = false;
+      for (const col of syncableKeys) {
+        const existingList = (
+          (db[col] as unknown as { id: string }[]) || []
+        ).filter((item) => !deletedSet.has(item.id));
+        if (
+          existingList.length !==
+          ((db[col] as unknown as { id: string }[]) || []).length
+        ) {
+          changed = true;
+        }
+        const existingIds = new Set(existingList.map((item) => item.id));
+        const incoming = (collectionsPayload[col] || []).filter(
+          (item) =>
+            item &&
+            typeof item.id === "string" &&
+            !existingIds.has(item.id) &&
+            !deletedSet.has(item.id)
+        );
+        if (incoming.length > 0) {
+          (db[col] as unknown as { id: string }[]) = [
+            ...incoming,
+            ...existingList,
+          ];
+          changed = true;
+        } else {
+          (db[col] as unknown as { id: string }[]) = existingList;
+        }
+      }
+
+      if (changed) {
+        writeAgencyDb(db);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     if (type === "update_settings") {
       if (
         body.updates &&
