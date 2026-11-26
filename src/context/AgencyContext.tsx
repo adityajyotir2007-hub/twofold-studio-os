@@ -33,6 +33,7 @@ import { INITIAL_AGENCY_DATA } from "@/lib/initial-data";
 import {
   CONNECTED_CALL_OUTCOMES,
   createDefaultProjectChecklist,
+  normalizeOutreachStatus,
 } from "@/lib/constants";
 import {
   AutoOutreachDispatchResponse,
@@ -278,6 +279,73 @@ const MERGEABLE_COLLECTIONS = [
   "templates",
 ] as const;
 
+let clientUidCounter = 0;
+function createUniqueId(prefix: string): string {
+  clientUidCounter = (clientUidCounter + 1) % 100000;
+  const rand = Math.random().toString(36).slice(2, 7);
+  return `${prefix}-${Date.now()}-${clientUidCounter}-${rand}`;
+}
+
+function sanitizeOutreachCollection(
+  rawList: OutreachActivity[] | undefined
+): OutreachActivity[] {
+  if (!Array.isArray(rawList)) return [];
+  const seenIds = new Set<string>();
+  const normalized: OutreachActivity[] = [];
+  for (let i = 0; i < rawList.length; i++) {
+    const item = rawList[i];
+    if (!item) continue;
+    let safeId = item.id || createUniqueId("out");
+    if (seenIds.has(safeId)) {
+      safeId = `${safeId}-${i + 1}-${Math.random().toString(36).slice(2, 5)}`;
+    }
+    seenIds.add(safeId);
+    const dir = item.direction || "Outbound";
+    normalized.push({
+      ...item,
+      id: safeId,
+      direction: dir,
+      replyStatus: normalizeOutreachStatus(item.replyStatus, dir),
+    });
+  }
+
+  // Collapse any legacy "-local-" duplicate into its canonical server row while keeping user status edits
+  const nonLocal = normalized.filter((o) => !o.id.includes("-local-"));
+  const localOnly = normalized.filter((o) => o.id.includes("-local-"));
+  if (localOnly.length === 0) return normalized;
+
+  const result = [...nonLocal];
+  for (const loc of localOnly) {
+    const canonIdx = result.findIndex(
+      (c) =>
+        c.leadId === loc.leadId &&
+        c.communicationChannel === loc.communicationChannel &&
+        c.dateSent === loc.dateSent &&
+        c.messageContent === loc.messageContent
+    );
+    if (canonIdx >= 0) {
+      const canon = result[canonIdx];
+      if (
+        (loc.updatedAtMs || 0) > (canon.updatedAtMs || 0) ||
+        (loc.replyStatus !== "Message Sent" &&
+          canon.replyStatus === "Message Sent")
+      ) {
+        result[canonIdx] = {
+          ...canon,
+          replyStatus: loc.replyStatus,
+          replyDate: loc.replyDate,
+          nextFollowUpDate: loc.nextFollowUpDate,
+          outcome: loc.outcome,
+          updatedAtMs: Math.max(loc.updatedAtMs || 0, canon.updatedAtMs || 0),
+        };
+      }
+    } else {
+      result.unshift(loc);
+    }
+  }
+  return result;
+}
+
 function mergeServerAndLocalState(
   server: AgencyDatabaseState,
   local: AgencyDatabaseState,
@@ -290,43 +358,99 @@ function mergeServerAndLocalState(
   const missingOnServer: Partial<Record<string, { id: string }[]>> = {};
 
   for (const key of MERGEABLE_COLLECTIONS) {
-    const serverArr = (
-      (server[key] as unknown as { id: string }[]) || []
-    ).filter((item) => item && !deletedIds.has(item.id));
-    const localArr = (
-      (local[key] as unknown as { id: string }[]) || []
-    ).filter((item) => item && !deletedIds.has(item.id));
+    const rawServerArr =
+      key === "outreach"
+        ? (sanitizeOutreachCollection(
+            server.outreach
+          ) as unknown as { id: string; updatedAtMs?: number }[])
+        : ((server[key] as unknown as { id: string; updatedAtMs?: number }[]) ||
+          []);
+    const rawLocalArr =
+      key === "outreach"
+        ? (sanitizeOutreachCollection(
+            local.outreach
+          ) as unknown as { id: string; updatedAtMs?: number }[])
+        : ((local[key] as unknown as { id: string; updatedAtMs?: number }[]) ||
+          []);
+
+    const serverArr = rawServerArr.filter(
+      (item) => item && !deletedIds.has(item.id)
+    );
+    const localArr = rawLocalArr.filter(
+      (item) => item && !deletedIds.has(item.id)
+    );
 
     const serverMap = new Map(serverArr.map((item) => [item.id, item]));
     const missing: { id: string }[] = [];
+    const toRehydrate: { id: string }[] = [];
 
     for (const localItem of localArr) {
       if (!serverMap.has(localItem.id)) {
-        // Avoid duplicating local optimistic outreach if server created an API outreach for same lead & channel
+        // Reconcile legacy local optimistic outreach ("out-*-local-*") with server copy without losing status edits
         if (key === "outreach") {
           const lo = localItem as unknown as OutreachActivity;
-          const alreadySyncedOnServer = (server.outreach || []).some(
-            (so) =>
-              so.leadId === lo.leadId &&
-              so.communicationChannel === lo.communicationChannel &&
-              so.dateSent === lo.dateSent &&
-              so.messageContent === lo.messageContent
-          );
-          if (alreadySyncedOnServer) continue;
+          const matchingServerEntry = Array.from(serverMap.values()).find(
+            (sEntry) => {
+              const so = sEntry as unknown as OutreachActivity;
+              return (
+                so.leadId === lo.leadId &&
+                so.communicationChannel === lo.communicationChannel &&
+                so.dateSent === lo.dateSent &&
+                so.messageContent === lo.messageContent &&
+                (lo.id.includes("-local-") || so.id.includes("-local-"))
+              );
+            }
+          ) as (OutreachActivity & { updatedAtMs?: number }) | undefined;
+
+          if (matchingServerEntry) {
+            const localEdited =
+              (lo.updatedAtMs || 0) > (matchingServerEntry.updatedAtMs || 0) ||
+              (lo.replyStatus !== "Message Sent" &&
+                matchingServerEntry.replyStatus === "Message Sent");
+            if (localEdited) {
+              const upgraded = {
+                ...matchingServerEntry,
+                replyStatus: lo.replyStatus,
+                replyDate: lo.replyDate,
+                nextFollowUpDate: lo.nextFollowUpDate,
+                outcome: lo.outcome,
+                updatedAtMs: Math.max(
+                  lo.updatedAtMs || Date.now(),
+                  (matchingServerEntry.updatedAtMs || 0) + 1
+                ),
+              };
+              serverMap.set(
+                matchingServerEntry.id,
+                upgraded as unknown as { id: string; updatedAtMs?: number }
+              );
+              toRehydrate.push(upgraded as unknown as { id: string });
+            }
+            continue;
+          }
         }
         missing.push(localItem);
-      } else if (key === "leads") {
-        // Keep whichever lead version has richer/newer history or social fields
-        const sLead = serverMap.get(localItem.id) as unknown as Lead;
-        const lLead = localItem as unknown as Lead;
-        if ((lLead.history?.length || 0) > (sLead.history?.length || 0)) {
+        toRehydrate.push(localItem);
+      } else {
+        const serverItem = serverMap.get(localItem.id)!;
+        const localTs = localItem.updatedAtMs || 0;
+        const serverTs = serverItem.updatedAtMs || 0;
+
+        if (localTs > serverTs) {
           serverMap.set(localItem.id, localItem);
+          toRehydrate.push(localItem);
+        } else if (key === "leads" && localTs === serverTs) {
+          const sLead = serverItem as unknown as Lead;
+          const lLead = localItem as unknown as Lead;
+          if ((lLead.history?.length || 0) > (sLead.history?.length || 0)) {
+            serverMap.set(localItem.id, localItem);
+            toRehydrate.push(localItem);
+          }
         }
       }
     }
 
-    if (missing.length > 0) {
-      missingOnServer[key] = missing;
+    if (toRehydrate.length > 0) {
+      missingOnServer[key] = toRehydrate;
     }
 
     (merged[key] as unknown as { id: string }[]) = [
@@ -621,19 +745,23 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       collection: string,
       id: string,
       updates: unknown,
-      auditMeta?: unknown
+      auditMeta?: unknown,
+      fallbackRecord?: unknown
     ) => {
-      await fetch(
-        `/api/transactions?__collection=${encodeURIComponent(collection)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, updates, auditMeta }),
-        }
-      );
-      await refreshState();
+      try {
+        await fetch(
+          `/api/transactions?__collection=${encodeURIComponent(collection)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, updates, auditMeta, fallbackRecord }),
+          }
+        );
+      } catch {
+        // local cache preserves optimistic update if offline
+      }
     },
-    [refreshState]
+    []
   );
 
   const apiDeleteRecord = useCallback(
@@ -999,6 +1127,12 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
         }));
       }
 
+      const clientOutreachIds: Partial<Record<SocialOutreachChannel, string>> =
+        {};
+      for (const r of immediate.response.results) {
+        clientOutreachIds[r.channel] = r.outreachId;
+      }
+
       // 2. Background server sync & live API send (if Gmail / WhatsApp Cloud API connected)
       try {
         const res = await fetch("/api/integrations", {
@@ -1009,6 +1143,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
             leadId: params.leadId,
             lead: mergedLead,
             channels: params.channels,
+            clientOutreachIds,
             customMessages: params.customMessages,
           }),
         });
@@ -1016,6 +1151,25 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
         const serverRes = (await res.json()) as AutoOutreachDispatchResponse;
         if (serverRes.ok && serverRes.results && serverRes.results.length > 0) {
           setLastAutoOutreachResult(serverRes);
+          const apiSentById = new Map(
+            serverRes.results
+              .filter((r) => r.sentViaApi && r.outreachId)
+              .map((r) => [r.outreachId, r])
+          );
+          if (apiSentById.size > 0) {
+            setDb((prev) => ({
+              ...prev,
+              outreach: prev.outreach.map((o) => {
+                const apiMatch = apiSentById.get(o.id);
+                if (!apiMatch) return o;
+                return {
+                  ...o,
+                  source: "api",
+                  outcome: `Auto-sent via ${apiMatch.label} API (${apiMatch.target})`,
+                };
+              }),
+            }));
+          }
         }
         return serverRes;
       } catch {
@@ -1328,14 +1482,17 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
   // OUTREACH & CAMPAIGNS CRUD
   const addOutreach = useCallback(
     (itemInput: Omit<OutreachActivity, "id">) => {
+      const dir = itemInput.direction || "Outbound";
       const newItem: OutreachActivity = {
         ...itemInput,
-        id: `out-${Date.now()}`,
+        id: createUniqueId("out"),
         memberId: itemInput.memberId || currentUser.id,
         occurredAt: itemInput.occurredAt || nowTimestamp(),
-        direction: itemInput.direction || "Outbound",
+        direction: dir,
         source: itemInput.source || "manual",
         deliveryStatus: itemInput.deliveryStatus || "sent",
+        replyStatus: normalizeOutreachStatus(itemInput.replyStatus, dir),
+        updatedAtMs: Date.now(),
         isDemo: false,
       };
       setDb((prev) => ({ ...prev, outreach: [newItem, ...prev.outreach] }));
@@ -1351,19 +1508,128 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
 
   const updateOutreach = useCallback(
     (id: string, updates: Partial<OutreachActivity>) => {
-      setDb((prev) => ({
-        ...prev,
-        outreach: prev.outreach.map((o) =>
-          o.id === id ? { ...o, ...updates } : o
-        ),
-      }));
-      apiUpdateRecord("outreach", id, updates, {
-        entityType: "Outreach",
-        entityName: id,
-        details: `Updated outreach record.`,
+      const nowMs = Date.now();
+      const existingOutreach = dbRef.current.outreach.find((o) => o.id === id);
+      const normalizedUpdates: Partial<OutreachActivity> = {
+        ...updates,
+        ...(updates.replyStatus !== undefined
+          ? {
+              replyStatus: normalizeOutreachStatus(
+                updates.replyStatus,
+                updates.direction || existingOutreach?.direction
+              ),
+            }
+          : {}),
+        updatedAtMs: nowMs,
+      };
+      const fallbackOutreach = existingOutreach
+        ? { ...existingOutreach, ...normalizedUpdates, id }
+        : undefined;
+
+      // Map outreach milestone status to parent Lead CRM status (without touching any other outreach rows)
+      let mappedLeadStatus: Lead["status"] | null = null;
+      if (normalizedUpdates.replyStatus) {
+        switch (normalizedUpdates.replyStatus) {
+          case "Replied":
+            mappedLeadStatus = "Replied";
+            break;
+          case "Interested":
+          case "Demo Shared":
+            mappedLeadStatus = "Interested";
+            break;
+          case "Meeting Booked":
+            mappedLeadStatus = "Meeting Scheduled";
+            break;
+          case "Converted":
+            mappedLeadStatus = "Converted";
+            break;
+          case "Not Interested":
+            mappedLeadStatus = "Not Interested";
+            break;
+          default:
+            mappedLeadStatus = null;
+        }
+      }
+
+      let updatedLeadSnapshot: Lead | null = null;
+
+      setDb((prev) => {
+        const nextOutreach = prev.outreach.map((o) =>
+          o.id === id ? { ...o, ...normalizedUpdates, id } : o
+        );
+
+        let nextLeads = prev.leads;
+        if (mappedLeadStatus && existingOutreach?.leadId) {
+          nextLeads = prev.leads.map((l) => {
+            if (l.id !== existingOutreach.leadId) return l;
+            if (l.status === "Converted" && mappedLeadStatus !== "Converted") {
+              return l;
+            }
+            if (l.status === mappedLeadStatus) return l;
+            const nextLead: Lead = {
+              ...l,
+              status: mappedLeadStatus,
+              lastContacted: todayDate(),
+              history: [
+                {
+                  id: createUniqueId("lh"),
+                  action: `Outreach status (${existingOutreach.communicationChannel}) updated to ${normalizedUpdates.replyStatus}`,
+                  actorName: currentUser.name,
+                  timestamp: nowTimestamp(),
+                },
+                ...(l.history || []),
+              ],
+            };
+            updatedLeadSnapshot = nextLead;
+            return nextLead;
+          });
+        }
+
+        const nextState = {
+          ...prev,
+          outreach: nextOutreach,
+          leads: nextLeads,
+        };
+        dbRef.current = nextState;
+        return nextState;
       });
+
+      apiUpdateRecord(
+        "outreach",
+        id,
+        normalizedUpdates,
+        {
+          entityType: "Outreach",
+          entityName: existingOutreach?.leadName || id,
+          details: normalizedUpdates.replyStatus
+            ? `Updated ${
+                existingOutreach?.communicationChannel || "outreach"
+              } reply status to ${normalizedUpdates.replyStatus}.`
+            : `Updated outreach record.`,
+        },
+        fallbackOutreach
+      );
+
+      if (updatedLeadSnapshot) {
+        const snap = updatedLeadSnapshot as Lead;
+        apiUpdateRecord(
+          "leads",
+          snap.id,
+          {
+            status: snap.status,
+            lastContacted: snap.lastContacted,
+            history: snap.history,
+          },
+          {
+            entityType: "Lead",
+            entityName: snap.businessName,
+            details: `Synced lead stage to ${snap.status} from outreach reply status.`,
+          },
+          snap
+        );
+      }
     },
-    [apiUpdateRecord]
+    [apiUpdateRecord, currentUser.name]
   );
 
   const deleteOutreach = useCallback(

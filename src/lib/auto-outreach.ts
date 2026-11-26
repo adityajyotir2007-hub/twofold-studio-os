@@ -262,6 +262,13 @@ export function detectNewlyAddedSocialChannels(
   return channels;
 }
 
+let outreachSeq = 0;
+function makeUniqueOutreachId(prefix: string): string {
+  outreachSeq = (outreachSeq + 1) % 100000;
+  const rand = Math.random().toString(36).slice(2, 7);
+  return `${prefix}-${Date.now()}-${outreachSeq}-${rand}`;
+}
+
 /**
  * Builds an instant client-side AutoOutreachDispatchResponse and OutreachActivity[]
  * in 0ms so the UI opens the Personalized Auto-DM modal immediately without waiting
@@ -312,9 +319,10 @@ export function buildClientAutoOutreachDispatch(params: {
       ? params.channels
       : ["instagram", "email", "whatsapp"];
 
-  const nowDate = new Date().toISOString().slice(0, 10);
-  const nowTs = new Date().toISOString().slice(0, 16).replace("T", " ");
-  const followUpDate = new Date(Date.now() + 3 * 86400000)
+  const nowMs = Date.now();
+  const nowDate = new Date(nowMs).toISOString().slice(0, 10);
+  const nowTs = new Date(nowMs).toISOString().slice(0, 16).replace("T", " ");
+  const followUpDate = new Date(nowMs + 3 * 86400000)
     .toISOString()
     .slice(0, 10);
   const businessName = params.lead.businessName || "Prospect";
@@ -323,7 +331,7 @@ export function buildClientAutoOutreachDispatch(params: {
   const activities: OutreachActivity[] = [];
 
   if (requested.includes("instagram") && finalMsgs.instagramHandle) {
-    const id = `out-ig-local-${Date.now()}`;
+    const id = makeUniqueOutreachId("out-ig");
     activities.push({
       id,
       leadId: params.leadId,
@@ -342,6 +350,7 @@ export function buildClientAutoOutreachDispatch(params: {
       replyDate: "",
       nextFollowUpDate: followUpDate,
       outcome: `Personalized Instagram DM prepared for @${finalMsgs.instagramHandle}`,
+      updatedAtMs: nowMs,
       isDemo: false,
     });
     results.push({
@@ -358,7 +367,7 @@ export function buildClientAutoOutreachDispatch(params: {
   }
 
   if (requested.includes("email") && isValidEmail(finalMsgs.emailAddress)) {
-    const id = `out-email-local-${Date.now()}`;
+    const id = makeUniqueOutreachId("out-email");
     activities.push({
       id,
       leadId: params.leadId,
@@ -378,6 +387,7 @@ export function buildClientAutoOutreachDispatch(params: {
       replyDate: "",
       nextFollowUpDate: followUpDate,
       outcome: `Personalized email prepared for ${finalMsgs.emailAddress}`,
+      updatedAtMs: nowMs,
       isDemo: false,
     });
     results.push({
@@ -395,7 +405,7 @@ export function buildClientAutoOutreachDispatch(params: {
   }
 
   if (requested.includes("whatsapp") && finalMsgs.whatsappPhone.length >= 5) {
-    const id = `out-wa-local-${Date.now()}`;
+    const id = makeUniqueOutreachId("out-wa");
     activities.push({
       id,
       leadId: params.leadId,
@@ -414,6 +424,7 @@ export function buildClientAutoOutreachDispatch(params: {
       replyDate: "",
       nextFollowUpDate: followUpDate,
       outcome: `Personalized WhatsApp DM prepared for +${finalMsgs.whatsappPhone}`,
+      updatedAtMs: nowMs,
       isDemo: false,
     });
     results.push({

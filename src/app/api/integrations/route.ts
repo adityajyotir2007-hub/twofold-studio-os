@@ -796,6 +796,10 @@ export async function POST(req: NextRequest) {
         ? (body.channels as SocialOutreachChannel[])
         : (["instagram", "email", "whatsapp"] as SocialOutreachChannel[]);
 
+      const clientOutreachIds = (body.clientOutreachIds || {}) as Partial<
+        Record<SocialOutreachChannel, string>
+      >;
+
       const customMessages = (body.customMessages || {}) as {
         instagramMessage?: string;
         emailSubject?: string;
@@ -879,7 +883,9 @@ export async function POST(req: NextRequest) {
         }
 
         const igOutreach: OutreachActivity = {
-          id: `out-ig-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id:
+            clientOutreachIds.instagram ||
+            `out-ig-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           leadId: targetLeadId,
           leadName: businessName,
           memberId: actor.id,
@@ -899,6 +905,7 @@ export async function POST(req: NextRequest) {
           outcome: sentViaApi
             ? `Auto-sent personalized Instagram DM via Meta Graph API (@${finalMsgs.instagramHandle})`
             : `Personalized Instagram DM generated for @${finalMsgs.instagramHandle}`,
+          updatedAtMs: Date.now(),
           isDemo: false,
         };
         createdActivities.push(igOutreach);
@@ -970,9 +977,13 @@ export async function POST(req: NextRequest) {
         }
 
         const emailOutreach: OutreachActivity = {
-          id: providerMsgId
-            ? `out-gmail-${providerMsgId}`
-            : `out-email-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id:
+            clientOutreachIds.email ||
+            (providerMsgId
+              ? `out-gmail-${providerMsgId}`
+              : `out-email-${Date.now()}-${Math.random()
+                  .toString(36)
+                  .slice(2, 6)}`),
           leadId: targetLeadId,
           leadName: businessName,
           memberId: actor.id,
@@ -994,6 +1005,7 @@ export async function POST(req: NextRequest) {
           outcome: sentViaApi
             ? `Auto-sent personalized email via Gmail API to ${finalMsgs.emailAddress}`
             : `Personalized email generated for ${finalMsgs.emailAddress}`,
+          updatedAtMs: Date.now(),
           isDemo: false,
         };
         createdActivities.push(emailOutreach);
@@ -1067,7 +1079,9 @@ export async function POST(req: NextRequest) {
         }
 
         const waOutreach: OutreachActivity = {
-          id: `out-wa-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id:
+            clientOutreachIds.whatsapp ||
+            `out-wa-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           leadId: targetLeadId,
           leadName: businessName,
           memberId: actor.id,
@@ -1087,6 +1101,7 @@ export async function POST(req: NextRequest) {
           outcome: sentViaApi
             ? `Auto-sent personalized WhatsApp message via Cloud API (+${finalMsgs.whatsappPhone})`
             : `Personalized WhatsApp DM generated for +${finalMsgs.whatsappPhone}`,
+          updatedAtMs: Date.now(),
           isDemo: false,
         };
         createdActivities.push(waOutreach);
@@ -1104,9 +1119,30 @@ export async function POST(req: NextRequest) {
       }
 
       if (createdActivities.length > 0) {
-        // Reload freshest DB right before write so concurrent lead creation is preserved
+        // Reload freshest DB right before write so concurrent lead creation or status edits are preserved
         const freshDb = readAgencyDb();
-        freshDb.outreach = [...createdActivities, ...(freshDb.outreach || [])];
+        const existingOutreachMap = new Map(
+          (freshDb.outreach || []).map((o) => [o.id, o])
+        );
+        const reconciledCreated = createdActivities.map((act) => {
+          const prev = existingOutreachMap.get(act.id);
+          if (prev && prev.replyStatus !== "Message Sent") {
+            return {
+              ...act,
+              replyStatus: prev.replyStatus,
+              replyDate: prev.replyDate,
+              nextFollowUpDate: prev.nextFollowUpDate,
+              outcome: prev.outcome,
+              updatedAtMs: Math.max(prev.updatedAtMs || 0, act.updatedAtMs || 0),
+            };
+          }
+          return act;
+        });
+        const createdIds = new Set(reconciledCreated.map((a) => a.id));
+        freshDb.outreach = [
+          ...reconciledCreated,
+          ...(freshDb.outreach || []).filter((o) => !createdIds.has(o.id)),
+        ];
 
         const channelNames = results.map((r) => r.label).join(", ");
         const leadExistsInContainer = (freshDb.leads || []).some(

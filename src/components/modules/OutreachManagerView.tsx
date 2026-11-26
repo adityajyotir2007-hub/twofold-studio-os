@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import { useAgency } from "@/context/AgencyContext";
 import {
   INDUSTRIES,
+  normalizeOutreachStatus,
   OUTREACH_CHANNELS,
   OUTREACH_STATUSES,
   POSITIVE_OUTREACH_STATUSES,
@@ -42,6 +43,71 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+
+const OUTREACH_STATUS_BADGE_CLASSES: Record<
+  OutreachStatus,
+  { select: string; dot: string }
+> = {
+  "Not Contacted": {
+    select:
+      "bg-neutral-100 text-neutral-700 border-neutral-300 dark:bg-neutral-800 dark:text-neutral-200 dark:border-neutral-700",
+    dot: "bg-neutral-400",
+  },
+  "Message Sent": {
+    select:
+      "bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950/60 dark:text-blue-200 dark:border-blue-800",
+    dot: "bg-blue-500",
+  },
+  "No Reply": {
+    select:
+      "bg-stone-100 text-stone-700 border-stone-300 dark:bg-stone-900 dark:text-stone-300 dark:border-stone-700",
+    dot: "bg-stone-400",
+  },
+  "Follow-up Required": {
+    select:
+      "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800",
+    dot: "bg-amber-500",
+  },
+  Replied: {
+    select:
+      "bg-cyan-50 text-cyan-800 border-cyan-200 dark:bg-cyan-950/60 dark:text-cyan-200 dark:border-cyan-800",
+    dot: "bg-cyan-500",
+  },
+  Interested: {
+    select:
+      "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800",
+    dot: "bg-emerald-500",
+  },
+  "Demo Shared": {
+    select:
+      "bg-violet-50 text-violet-800 border-violet-200 dark:bg-violet-950/60 dark:text-violet-200 dark:border-violet-800",
+    dot: "bg-violet-500",
+  },
+  "Meeting Booked": {
+    select:
+      "bg-indigo-50 text-indigo-800 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-200 dark:border-indigo-800",
+    dot: "bg-indigo-500",
+  },
+  Converted: {
+    select:
+      "bg-green-100 text-green-900 border-green-300 dark:bg-green-950/70 dark:text-green-200 dark:border-green-700",
+    dot: "bg-green-600",
+  },
+  "Not Interested": {
+    select:
+      "bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-950/60 dark:text-rose-200 dark:border-rose-800",
+    dot: "bg-rose-500",
+  },
+};
+
+const PROSPECT_RESPONDED_STATUSES = new Set<OutreachStatus>([
+  "Replied",
+  "Interested",
+  "Demo Shared",
+  "Meeting Booked",
+  "Converted",
+  "Not Interested",
+]);
 
 export function OutreachManagerView() {
   const {
@@ -143,7 +209,24 @@ export function OutreachManagerView() {
 
   // Outreach Analytics calculations (distinguishing Manual vs API, Sent vs Delivered, Replied vs Positive)
   const analytics = useMemo(() => {
-    const outbound = db.outreach.filter((o) => o.direction !== "Inbound");
+    const normalizedOutreach = db.outreach.map((o) => ({
+      ...o,
+      replyStatus: normalizeOutreachStatus(o.replyStatus, o.direction),
+    }));
+
+    const statusCounts: Record<string, number> = {
+      All: normalizedOutreach.length,
+    };
+    for (const st of OUTREACH_STATUSES) {
+      statusCounts[st] = 0;
+    }
+    for (const o of normalizedOutreach) {
+      statusCounts[o.replyStatus] = (statusCounts[o.replyStatus] || 0) + 1;
+    }
+
+    const outbound = normalizedOutreach.filter(
+      (o) => o.direction !== "Inbound"
+    );
     const totalSent = outbound.filter(
       (o) => o.replyStatus !== "Not Contacted"
     ).length;
@@ -156,34 +239,64 @@ export function OutreachManagerView() {
       (o) =>
         (o.communicationChannel === "Instagram DMs" ||
           o.communicationChannel === "WhatsApp Messages") &&
-        o.source !== "api"
+        o.source !== "api" &&
+        o.replyStatus !== "Not Contacted"
     ).length;
     const apiDms = outbound.filter(
       (o) =>
         (o.communicationChannel === "Instagram DMs" ||
           o.communicationChannel === "WhatsApp Messages") &&
-        o.source === "api"
+        o.source === "api" &&
+        o.replyStatus !== "Not Contacted"
     ).length;
 
-    // Deduplicate replies by leadId + channel so the same reply is never counted twice
-    const repliedActivities = db.outreach.filter((o) =>
-      REPLIED_OUTREACH_STATUSES.has(o.replyStatus)
-    );
-    const totalReplies = repliedActivities.length;
+    // Deduplicate replies by lead + channel so inbound + outbound pair on the same thread isn't double-counted
+    const seenReplyPairs = new Set<string>();
+    for (const o of normalizedOutreach) {
+      if (REPLIED_OUTREACH_STATUSES.has(o.replyStatus)) {
+        const key = `${o.leadId || o.leadName.toLowerCase()}::${
+          o.communicationChannel
+        }::${o.id}`;
+        // Deduplicate inbound webhook + outbound thread pair sharing providerThreadId
+        const dedupeKey = o.providerThreadId
+          ? `thread::${o.providerThreadId}`
+          : key;
+        seenReplyPairs.add(dedupeKey);
+      }
+    }
+    const totalReplies = seenReplyPairs.size;
     const replyRate =
-      totalSent > 0 ? Math.round((totalReplies / totalSent) * 1000) / 10 : 0;
-    const positiveReplies = db.outreach.filter((o) =>
+      totalSent > 0
+        ? Math.min(100, Math.round((totalReplies / totalSent) * 1000) / 10)
+        : 0;
+    const positiveReplies = normalizedOutreach.filter((o) =>
       POSITIVE_OUTREACH_STATUSES.has(o.replyStatus)
     ).length;
-    const meetingsBooked = db.outreach.filter(
+    const meetingsBooked = normalizedOutreach.filter(
       (o) =>
         o.replyStatus === "Meeting Booked" || o.replyStatus === "Converted"
     ).length;
-    const conversions = db.leads.filter((l) => l.status === "Converted").length;
+
+    const convertedKeys = new Set<string>();
+    for (const l of db.leads) {
+      if (l.status === "Converted") {
+        convertedKeys.add(l.id || l.businessName.toLowerCase());
+      }
+    }
+    for (const o of normalizedOutreach) {
+      if (o.replyStatus === "Converted") {
+        convertedKeys.add(o.leadId || o.leadName.toLowerCase());
+      }
+    }
+    const conversions = convertedKeys.size;
 
     const byChannel = OUTREACH_CHANNELS.map((ch) => {
-      const items = db.outreach.filter((o) => o.communicationChannel === ch);
-      const sent = items.filter((o) => o.direction !== "Inbound").length;
+      const items = normalizedOutreach.filter(
+        (o) => o.communicationChannel === ch
+      );
+      const sent = items.filter(
+        (o) => o.direction !== "Inbound" && o.replyStatus !== "Not Contacted"
+      ).length;
       const replies = items.filter((o) =>
         REPLIED_OUTREACH_STATUSES.has(o.replyStatus)
       ).length;
@@ -209,6 +322,7 @@ export function OutreachManagerView() {
       meetingsBooked,
       conversions,
       byChannel,
+      statusCounts,
     };
   }, [db.outreach, db.leads]);
 
@@ -278,12 +392,16 @@ export function OutreachManagerView() {
   const filteredOutreach = useMemo(() => {
     const q = search.trim().toLowerCase();
     return db.outreach.filter((o) => {
+      const normalizedStatus = normalizeOutreachStatus(
+        o.replyStatus,
+        o.direction
+      );
       if (
         channelFilter !== "All" &&
         o.communicationChannel !== channelFilter
       )
         return false;
-      if (statusFilter !== "All" && o.replyStatus !== statusFilter)
+      if (statusFilter !== "All" && normalizedStatus !== statusFilter)
         return false;
       if (campaignFilter !== "All" && o.campaignId !== campaignFilter)
         return false;
@@ -292,10 +410,35 @@ export function OutreachManagerView() {
         o.leadName.toLowerCase().includes(q) ||
         o.messageContent.toLowerCase().includes(q) ||
         o.messageTemplateUsed.toLowerCase().includes(q) ||
-        o.outcome.toLowerCase().includes(q)
+        (o.outcome || "").toLowerCase().includes(q)
       );
     });
   }, [db.outreach, channelFilter, statusFilter, campaignFilter, search]);
+
+  const handleInlineReplyStatusChange = (
+    item: OutreachActivity,
+    rawNextStatus: string
+  ) => {
+    const nextStatus = normalizeOutreachStatus(rawNextStatus, item.direction);
+    const today = new Date().toISOString().slice(0, 10);
+    const hasResponse = PROSPECT_RESPONDED_STATUSES.has(nextStatus);
+    const nextReplyDate = hasResponse ? item.replyDate || today : "";
+
+    let nextFollowUpDate = item.nextFollowUpDate;
+    if (nextStatus === "Converted" || nextStatus === "Not Interested") {
+      nextFollowUpDate = "";
+    } else if (nextStatus === "Follow-up Required" && !nextFollowUpDate) {
+      nextFollowUpDate = new Date(Date.now() + 2 * 86400000)
+        .toISOString()
+        .slice(0, 10);
+    }
+
+    updateOutreach(item.id, {
+      replyStatus: nextStatus,
+      replyDate: nextReplyDate,
+      nextFollowUpDate,
+    });
+  };
 
   const applyTemplateToForm = (templateId: string) => {
     const tpl = db.templates.find((t) => t.id === templateId);
@@ -344,6 +487,10 @@ export function OutreachManagerView() {
   };
 
   const openEditModal = (item: OutreachActivity) => {
+    const safeStatus = normalizeOutreachStatus(
+      item.replyStatus,
+      item.direction
+    );
     setEditingItem(item);
     setFormState({
       leadId: item.leadId,
@@ -353,8 +500,10 @@ export function OutreachManagerView() {
       messageTemplateUsed: item.messageTemplateUsed,
       dateSent: item.dateSent,
       messageContent: item.messageContent,
-      replyStatus: item.replyStatus,
-      replyDate: item.replyDate,
+      replyStatus: safeStatus,
+      replyDate: PROSPECT_RESPONDED_STATUSES.has(safeStatus)
+        ? item.replyDate
+        : "",
       nextFollowUpDate: item.nextFollowUpDate,
       outcome: item.outcome,
     });
@@ -806,57 +955,134 @@ export function OutreachManagerView() {
             </div>
           </div>
 
-          {/* Filter Bar */}
-          <div className="bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 rounded-xl p-3.5 flex flex-wrap items-center gap-2.5">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by lead name, message content, template, or outcome..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950"
-              />
+          {/* Filter Bar + Reply Status Pipeline Strip */}
+          <div className="bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 rounded-xl p-3.5 space-y-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by lead name, message content, template, or outcome..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100"
+                />
+              </div>
+
+              <select
+                value={campaignFilter}
+                onChange={(e) => setCampaignFilter(e.target.value)}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100"
+              >
+                <option
+                  value="All"
+                  className="bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100"
+                >
+                  All Campaigns
+                </option>
+                {(db.campaigns || []).map((c) => (
+                  <option
+                    key={c.id}
+                    value={c.id}
+                    className="bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100"
+                  >
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={channelFilter}
+                onChange={(e) => setChannelFilter(e.target.value)}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100"
+              >
+                <option
+                  value="All"
+                  className="bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100"
+                >
+                  All Channels
+                </option>
+                {OUTREACH_CHANNELS.map((ch) => (
+                  <option
+                    key={ch}
+                    value={ch}
+                    className="bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100"
+                  >
+                    {ch}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100"
+              >
+                <option
+                  value="All"
+                  className="bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100"
+                >
+                  All Reply Statuses ({analytics.statusCounts.All || 0})
+                </option>
+                {OUTREACH_STATUSES.map((st) => (
+                  <option
+                    key={st}
+                    value={st}
+                    className="bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100"
+                  >
+                    {st} ({analytics.statusCounts[st] || 0})
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <select
-              value={campaignFilter}
-              onChange={(e) => setCampaignFilter(e.target.value)}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-            >
-              <option value="All">All Campaigns</option>
-              {(db.campaigns || []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={channelFilter}
-              onChange={(e) => setChannelFilter(e.target.value)}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-            >
-              <option value="All">All Channels</option>
-              {OUTREACH_CHANNELS.map((ch) => (
-                <option key={ch} value={ch}>
-                  {ch}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-            >
-              <option value="All">All Outreach Statuses</option>
-              {OUTREACH_STATUSES.map((st) => (
-                <option key={st} value={st}>
-                  {st}
-                </option>
-              ))}
-            </select>
+            {/* Interactive Reply Status Breakdown Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-neutral-100 dark:border-neutral-800/80">
+              <span className="text-[11px] font-medium text-neutral-500 mr-1">
+                Reply Status:
+              </span>
+              <button
+                type="button"
+                onClick={() => setStatusFilter("All")}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition ${
+                  statusFilter === "All"
+                    ? "bg-neutral-900 text-white border-neutral-900 dark:bg-white dark:text-neutral-900 dark:border-white"
+                    : "bg-neutral-50 text-neutral-600 border-neutral-200 hover:bg-neutral-100 dark:bg-neutral-950 dark:text-neutral-300 dark:border-neutral-800 dark:hover:bg-neutral-800"
+                }`}
+              >
+                <span>All</span>
+                <span className="tabular-nums opacity-75">
+                  {analytics.statusCounts.All || 0}
+                </span>
+              </button>
+              {OUTREACH_STATUSES.map((st) => {
+                const count = analytics.statusCounts[st] || 0;
+                const active = statusFilter === st;
+                const badgeMeta = OUTREACH_STATUS_BADGE_CLASSES[st];
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() =>
+                      setStatusFilter((prev) => (prev === st ? "All" : st))
+                    }
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition ${
+                      active
+                        ? "bg-neutral-900 text-white border-neutral-900 dark:bg-white dark:text-neutral-900 dark:border-white"
+                        : "bg-neutral-50 text-neutral-600 border-neutral-200 hover:bg-neutral-100 dark:bg-neutral-950 dark:text-neutral-300 dark:border-neutral-800 dark:hover:bg-neutral-800"
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        badgeMeta?.dot || "bg-neutral-400"
+                      }`}
+                    />
+                    <span>{st}</span>
+                    <span className="tabular-nums opacity-75">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Outreach Activity Log Table */}
@@ -869,122 +1095,190 @@ export function OutreachManagerView() {
                     <th className="py-2.5 px-3.5">Channel &amp; Source</th>
                     <th className="py-2.5 px-3.5">Message Content</th>
                     <th className="py-2.5 px-3.5">Date Sent</th>
-                    <th className="py-2.5 px-3.5">Reply Status</th>
+                    <th className="py-2.5 px-3.5 min-w-[185px]">Reply Status</th>
                     <th className="py-2.5 px-3.5">Next Follow-up</th>
                     <th className="py-2.5 px-3.5">Outcome</th>
                     <th className="py-2.5 px-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/70 text-xs">
-                  {filteredOutreach.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="hover:bg-neutral-50/80 dark:hover:bg-neutral-800/30 transition"
-                    >
-                      <td className="py-3 px-3.5 font-semibold text-neutral-900 dark:text-neutral-100">
-                        <div className="flex items-center gap-1.5">
-                          <span>{item.leadName}</span>
-                          {item.isDemo && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 font-semibold">
-                              DEMO
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] font-normal text-neutral-400">
-                          {item.direction || "Outbound"}
-                          {item.providerMessageId
-                            ? ` · ID: ${item.providerMessageId.slice(0, 12)}`
-                            : ""}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[11px] font-medium">
-                            {item.communicationChannel}
-                          </span>
-                          <span
-                            className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${
-                              item.source === "api"
-                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-                                : "bg-neutral-100 text-neutral-500 dark:bg-neutral-800"
-                            }`}
-                          >
-                            {item.source === "api" ? "API Synced" : "Manual"}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-neutral-400 mt-0.5">
-                          {item.messageTemplateUsed || "Custom Message"}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3.5 max-w-xs">
-                        {item.subject && (
-                          <div className="font-medium text-neutral-800 dark:text-neutral-200 truncate">
-                            {item.subject}
-                          </div>
-                        )}
-                        <p className="text-neutral-600 dark:text-neutral-300 line-clamp-2">
-                          {item.messageContent}
-                        </p>
-                      </td>
-                      <td className="py-3 px-3.5 tabular-nums text-[11px] text-neutral-500">
-                        {item.dateSent}
-                        {item.replyDate && (
-                          <div className="text-[10px] text-emerald-600">
-                            Replied: {item.replyDate}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-3 px-3.5">
-                        <select
-                          value={item.replyStatus}
-                          onChange={(e) =>
-                            updateOutreach(item.id, {
-                              replyStatus: e.target.value as OutreachStatus,
-                              replyDate:
-                                e.target.value !== "Message Sent" &&
-                                e.target.value !== "Not Contacted"
-                                  ? item.replyDate ||
-                                    new Date().toISOString().slice(0, 10)
-                                  : item.replyDate,
-                            })
-                          }
-                          className="px-2 py-1 rounded-md text-[11px] font-medium border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-                        >
-                          {OUTREACH_STATUSES.map((st) => (
-                            <option key={st} value={st}>
-                              {st}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="py-3 px-3.5 tabular-nums text-[11px] text-neutral-600 dark:text-neutral-400">
-                        {item.nextFollowUpDate || "—"}
-                      </td>
-                      <td className="py-3 px-3.5 text-[11px] text-neutral-600 dark:text-neutral-300 max-w-[180px]">
-                        {item.outcome || "—"}
-                      </td>
-                      <td className="py-3 px-3.5 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(item)}
-                            className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          {permissions.deleteRecords && (
+                  {filteredOutreach.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="py-10 px-4 text-center text-neutral-500 dark:text-neutral-400"
+                      >
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                            {db.outreach.length === 0
+                              ? "No outreach messages logged yet."
+                              : "No outreach activities match your current Reply Status or search filter."}
+                          </p>
+                          {db.outreach.length === 0 ? (
                             <button
                               type="button"
-                              onClick={() => deleteOutreach(item.id)}
-                              className="p-1.5 rounded hover:bg-red-50 text-neutral-400 hover:text-red-600"
+                              onClick={openLogModal}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Plus className="w-3.5 h-3.5" /> Log / Send First
+                              Outreach
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStatusFilter("All");
+                                setChannelFilter("All");
+                                setCampaignFilter("All");
+                                setSearch("");
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200"
+                            >
+                              Clear Active Filters
                             </button>
                           )}
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredOutreach.map((item) => {
+                      const safeStatus = normalizeOutreachStatus(
+                        item.replyStatus,
+                        item.direction
+                      );
+                      const statusStyle =
+                        OUTREACH_STATUS_BADGE_CLASSES[safeStatus] ||
+                        OUTREACH_STATUS_BADGE_CLASSES["Message Sent"];
+                      const showReplyDate =
+                        PROSPECT_RESPONDED_STATUSES.has(safeStatus) &&
+                        Boolean(item.replyDate);
+
+                      return (
+                        <tr
+                          key={item.id}
+                          className="hover:bg-neutral-50/80 dark:hover:bg-neutral-800/30 transition"
+                        >
+                          <td className="py-3 px-3.5 font-semibold text-neutral-900 dark:text-neutral-100">
+                            <div className="flex items-center gap-1.5">
+                              <span>{item.leadName}</span>
+                              {item.isDemo && (
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 font-semibold">
+                                  DEMO
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] font-normal text-neutral-400">
+                              {item.direction || "Outbound"}
+                              {item.providerMessageId
+                                ? ` · ID: ${item.providerMessageId.slice(0, 12)}`
+                                : ""}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[11px] font-medium text-neutral-800 dark:text-neutral-200">
+                                {item.communicationChannel}
+                              </span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${
+                                  item.source === "api"
+                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                    : "bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
+                                }`}
+                              >
+                                {item.source === "api" ? "API Synced" : "Manual"}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-neutral-400 mt-0.5">
+                              {item.messageTemplateUsed || "Custom Message"}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3.5 max-w-xs">
+                            {item.subject && (
+                              <div className="font-medium text-neutral-800 dark:text-neutral-200 truncate">
+                                {item.subject}
+                              </div>
+                            )}
+                            <p className="text-neutral-600 dark:text-neutral-300 line-clamp-2">
+                              {item.messageContent}
+                            </p>
+                          </td>
+                          <td className="py-3 px-3.5 tabular-nums text-[11px] text-neutral-500 dark:text-neutral-400">
+                            <div>{item.dateSent || "—"}</div>
+                            {showReplyDate && (
+                              <div
+                                className={`text-[10px] mt-0.5 font-medium ${
+                                  safeStatus === "Not Interested"
+                                    ? "text-rose-600 dark:text-rose-400"
+                                    : "text-emerald-600 dark:text-emerald-400"
+                                }`}
+                              >
+                                {safeStatus === "Not Interested"
+                                  ? `Declined: ${item.replyDate}`
+                                  : `Replied: ${item.replyDate}`}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-3.5 min-w-[185px]">
+                            <div className="relative inline-flex items-center w-full max-w-[180px]">
+                              <span
+                                className={`w-2 h-2 rounded-full absolute left-2.5 pointer-events-none ${statusStyle.dot}`}
+                              />
+                              <select
+                                aria-label={`Reply status for ${item.leadName} (${item.communicationChannel})`}
+                                value={safeStatus}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  handleInlineReplyStatusChange(
+                                    item,
+                                    e.target.value
+                                  );
+                                }}
+                                className={`w-full pl-6 pr-2.5 py-1.5 rounded-lg text-[11px] font-semibold border cursor-pointer transition focus:outline-none focus:ring-2 focus:ring-neutral-400/40 ${statusStyle.select}`}
+                              >
+                                {OUTREACH_STATUSES.map((st) => (
+                                  <option
+                                    key={st}
+                                    value={st}
+                                    className="bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100 font-medium"
+                                  >
+                                    {st}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </td>
+                          <td className="py-3 px-3.5 tabular-nums text-[11px] text-neutral-600 dark:text-neutral-400">
+                            {item.nextFollowUpDate || "—"}
+                          </td>
+                          <td className="py-3 px-3.5 text-[11px] text-neutral-600 dark:text-neutral-300 max-w-[180px]">
+                            {item.outcome || "—"}
+                          </td>
+                          <td className="py-3 px-3.5 text-right">
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(item)}
+                                className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              {permissions.deleteRecords && (
+                                <button
+                                  type="button"
+                                  onClick={() => deleteOutreach(item.id)}
+                                  className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-950/40 text-neutral-400 hover:text-red-600"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1184,16 +1478,29 @@ export function OutreachManagerView() {
                   <label className="block font-medium mb-1">Reply Status</label>
                   <select
                     value={formState.replyStatus}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const nextSt = normalizeOutreachStatus(
+                        e.target.value,
+                        editingItem?.direction
+                      );
+                      const hasResp = PROSPECT_RESPONDED_STATUSES.has(nextSt);
                       setFormState({
                         ...formState,
-                        replyStatus: e.target.value as OutreachStatus,
-                      })
-                    }
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950"
+                        replyStatus: nextSt,
+                        replyDate: hasResp
+                          ? formState.replyDate ||
+                            new Date().toISOString().slice(0, 10)
+                          : "",
+                      });
+                    }}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100"
                   >
                     {OUTREACH_STATUSES.map((st) => (
-                      <option key={st} value={st}>
+                      <option
+                        key={st}
+                        value={st}
+                        className="bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100"
+                      >
                         {st}
                       </option>
                     ))}

@@ -146,9 +146,10 @@ export type OutreachChannel =
 export type OutreachStatus =
   | "Not Contacted"
   | "Message Sent"
+  | "No Reply"
+  | "Follow-up Required"
   | "Replied"
   | "Interested"
-  | "Follow-up Required"
   | "Demo Shared"
   | "Meeting Booked"
   | "Converted"
@@ -176,6 +177,7 @@ export interface OutreachActivity {
   replyDate: string;
   nextFollowUpDate: string;
   outcome: string;
+  updatedAtMs?: number;
   isDemo?: boolean;
   legacyId?: string;
 }

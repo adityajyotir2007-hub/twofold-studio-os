@@ -62,14 +62,63 @@ export const OUTREACH_CHANNELS: OutreachChannel[] = [
 export const OUTREACH_STATUSES: OutreachStatus[] = [
   "Not Contacted",
   "Message Sent",
+  "No Reply",
+  "Follow-up Required",
   "Replied",
   "Interested",
-  "Follow-up Required",
   "Demo Shared",
   "Meeting Booked",
   "Converted",
   "Not Interested",
 ];
+
+export const OUTREACH_STATUS_SET = new Set<string>(OUTREACH_STATUSES);
+
+/**
+ * Ensures every outreach activity has a valid non-empty OutreachStatus so UI
+ * dropdowns and filters never render blank/unmatched holes.
+ */
+export function normalizeOutreachStatus(
+  raw?: string | null,
+  direction?: "Outbound" | "Inbound"
+): OutreachStatus {
+  const trimmed = (raw || "").trim();
+  if (OUTREACH_STATUS_SET.has(trimmed)) {
+    return trimmed as OutreachStatus;
+  }
+  const lower = trimmed.toLowerCase();
+  if (!lower) {
+    return direction === "Inbound" ? "Replied" : "Message Sent";
+  }
+  if (lower === "sent" || lower === "delivered" || lower === "read" || lower === "contacted") {
+    return "Message Sent";
+  }
+  if (lower === "no reply" || lower === "ghosted" || lower === "unanswered") {
+    return "No Reply";
+  }
+  if (lower.includes("follow")) {
+    return "Follow-up Required";
+  }
+  if (lower === "meeting scheduled" || lower.includes("meeting") || lower.includes("booked")) {
+    return "Meeting Booked";
+  }
+  if (lower.includes("demo")) {
+    return "Demo Shared";
+  }
+  if (lower.includes("not interested") || lower === "declined" || lower === "lost" || lower === "rejected") {
+    return "Not Interested";
+  }
+  if (lower.includes("interest")) {
+    return "Interested";
+  }
+  if (lower.includes("convert") || lower === "won" || lower === "closed") {
+    return "Converted";
+  }
+  if (lower.includes("repl") || direction === "Inbound") {
+    return "Replied";
+  }
+  return "Message Sent";
+}
 
 export const CALL_OUTCOMES: CallOutcome[] = [
   "No Answer",

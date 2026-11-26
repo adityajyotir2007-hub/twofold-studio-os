@@ -283,7 +283,8 @@ export async function PATCH(req: NextRequest) {
       id,
       body.updates || {},
       { id: actor.id, name: actor.name },
-      body.auditMeta
+      body.auditMeta,
+      body.fallbackRecord
     );
 
     if (!updated) {
@@ -743,31 +744,46 @@ export async function POST(req: NextRequest) {
 
       let changed = false;
       for (const col of syncableKeys) {
-        const existingList = (
-          (db[col] as unknown as { id: string }[]) || []
-        ).filter((item) => !deletedSet.has(item.id));
-        if (
-          existingList.length !==
-          ((db[col] as unknown as { id: string }[]) || []).length
-        ) {
+        const rawExisting =
+          (db[col] as unknown as { id: string; updatedAtMs?: number }[]) || [];
+        const existingList = rawExisting.filter(
+          (item) => item && !deletedSet.has(item.id)
+        );
+        if (existingList.length !== rawExisting.length) {
           changed = true;
         }
-        const existingIds = new Set(existingList.map((item) => item.id));
-        const incoming = (collectionsPayload[col] || []).filter(
+        const existingMap = new Map(existingList.map((item) => [item.id, item]));
+        const incomingRows = (
+          (collectionsPayload[col] || []) as {
+            id: string;
+            updatedAtMs?: number;
+          }[]
+        ).filter(
           (item) =>
-            item &&
-            typeof item.id === "string" &&
-            !existingIds.has(item.id) &&
-            !deletedSet.has(item.id)
+            item && typeof item.id === "string" && !deletedSet.has(item.id)
         );
-        if (incoming.length > 0) {
+
+        const brandNew: { id: string; updatedAtMs?: number }[] = [];
+        for (const inc of incomingRows) {
+          const cur = existingMap.get(inc.id);
+          if (!cur) {
+            brandNew.push(inc);
+          } else if ((inc.updatedAtMs || 0) > (cur.updatedAtMs || 0)) {
+            existingMap.set(inc.id, { ...cur, ...inc });
+            changed = true;
+          }
+        }
+
+        if (brandNew.length > 0) {
           (db[col] as unknown as { id: string }[]) = [
-            ...incoming,
-            ...existingList,
+            ...brandNew,
+            ...Array.from(existingMap.values()),
           ];
           changed = true;
         } else {
-          (db[col] as unknown as { id: string }[]) = existingList;
+          (db[col] as unknown as { id: string }[]) = Array.from(
+            existingMap.values()
+          );
         }
       }
 

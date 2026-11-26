@@ -18,6 +18,7 @@ import {
   CONNECTED_CALL_OUTCOMES,
   createDefaultProjectChecklist,
   DEFAULT_INTEGRATIONS,
+  normalizeOutreachStatus,
 } from "./constants";
 import { decryptSecrets, encryptSecrets } from "./crypto-vault";
 import { realtimeBus } from "./realtime-bus";
@@ -65,16 +66,27 @@ function upgradeStateSchema(raw: AgencyDatabaseState): AgencyDatabaseState {
     isDemo:
       typeof l.isDemo === "boolean" ? l.isDemo : SEED_DEMO_IDS.leads.has(l.id),
   }));
-  const outreach = (raw.outreach || []).map((o) => ({
-    ...o,
-    direction: o.direction || "Outbound",
-    source: o.source || "manual",
-    deliveryStatus: o.deliveryStatus || "sent",
-    isDemo:
-      typeof o.isDemo === "boolean"
-        ? o.isDemo
-        : SEED_DEMO_IDS.outreach.has(o.id),
-  }));
+  const seenOutreachIds = new Set<string>();
+  const outreach = (raw.outreach || []).map((o, idx) => {
+    let safeId = o.id || `out-norm-${idx}-${Date.now()}`;
+    if (seenOutreachIds.has(safeId)) {
+      safeId = `${safeId}-dup-${idx}`;
+    }
+    seenOutreachIds.add(safeId);
+    const dir = o.direction || "Outbound";
+    return {
+      ...o,
+      id: safeId,
+      direction: dir,
+      source: o.source || "manual",
+      deliveryStatus: o.deliveryStatus || "sent",
+      replyStatus: normalizeOutreachStatus(o.replyStatus, dir),
+      isDemo:
+        typeof o.isDemo === "boolean"
+          ? o.isDemo
+          : SEED_DEMO_IDS.outreach.has(safeId),
+    };
+  });
   const clients = (raw.clients || []).map((c) => ({
     ...c,
     isDemo:
@@ -422,16 +434,27 @@ export async function updateRecordById<T extends { id: string }>(
     entityName: string;
     details: string;
     notification?: Omit<AgencyNotification, "id" | "isRead" | "createdAt">;
-  }
+  },
+  fallbackRecord?: T
 ): Promise<T | null> {
   const db = readAgencyDb();
   const list = (db[collection] as unknown as T[]) || [];
   const idx = list.findIndex((item) => item.id === id);
-  if (idx < 0) return null;
+  const stampedUpdates = {
+    ...updates,
+    updatedAtMs: Date.now(),
+  } as Partial<T>;
 
-  const updated = { ...list[idx], ...updates };
-  list[idx] = updated;
-  (db[collection] as unknown as T[]) = list;
+  let updated: T;
+  if (idx < 0) {
+    if (!fallbackRecord) return null;
+    updated = { ...fallbackRecord, ...stampedUpdates, id } as T;
+    (db[collection] as unknown as T[]) = [updated, ...list];
+  } else {
+    updated = { ...list[idx], ...stampedUpdates, id };
+    list[idx] = updated;
+    (db[collection] as unknown as T[]) = list;
+  }
 
   // If a task is completed and linked to a project, recalculate project progress if appropriate
   if (collection === "tasks") {
