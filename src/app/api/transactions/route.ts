@@ -787,6 +787,61 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Workspace-scoped rehydration for AI Prospecting collections
+      if (session) {
+        const wsId = session.workspaceId;
+        for (const pKey of ["prospects", "prospectImports"] as const) {
+          const incomingForWs = (
+            (body.collections?.[pKey] || []) as {
+              id: string;
+              workspaceId?: string;
+              updatedAtMs?: number;
+            }[]
+          ).filter(
+            (item) =>
+              item &&
+              typeof item.id === "string" &&
+              item.workspaceId === wsId &&
+              !deletedSet.has(item.id)
+          );
+          const rawExisting = (
+            (db[pKey] as unknown as {
+              id: string;
+              workspaceId?: string;
+              updatedAtMs?: number;
+            }[]) || []
+          ).filter((item) => item && !deletedSet.has(item.id));
+          if (
+            rawExisting.length !==
+            ((db[pKey] as unknown as { id: string }[]) || []).length
+          ) {
+            changed = true;
+          }
+          const existingMap = new Map(rawExisting.map((item) => [item.id, item]));
+          const brandNew: { id: string; updatedAtMs?: number }[] = [];
+          for (const inc of incomingForWs) {
+            const cur = existingMap.get(inc.id);
+            if (!cur) {
+              brandNew.push(inc);
+            } else if ((inc.updatedAtMs || 0) > (cur.updatedAtMs || 0)) {
+              existingMap.set(inc.id, { ...cur, ...inc });
+              changed = true;
+            }
+          }
+          if (brandNew.length > 0) {
+            (db[pKey] as unknown as { id: string }[]) = [
+              ...brandNew,
+              ...Array.from(existingMap.values()),
+            ];
+            changed = true;
+          } else {
+            (db[pKey] as unknown as { id: string }[]) = Array.from(
+              existingMap.values()
+            );
+          }
+        }
+      }
+
       if (changed) {
         writeAgencyDb(db);
       }

@@ -29,6 +29,7 @@ import {
   TeamMember,
   UserRole,
 } from "@/types/agency";
+import { Prospect, ProspectImport } from "@/types/prospecting";
 import { INITIAL_AGENCY_DATA } from "@/lib/initial-data";
 import {
   CONNECTED_CALL_OUTCOMES,
@@ -249,6 +250,13 @@ interface AgencyContextValue {
   markAllNotificationsRead: () => void;
   updateSettings: (updates: Partial<AgencySettings>) => void;
   purgeDemoRecords: () => Promise<void>;
+
+  // AI Prospecting
+  applyProspectingState: (payload: {
+    prospects?: Prospect[];
+    prospectImports?: ProspectImport[];
+  }) => void;
+  markProspectsDeleted: (ids: string[]) => void;
 }
 
 const AgencyContext = createContext<AgencyContextValue | null>(null);
@@ -277,6 +285,8 @@ const MERGEABLE_COLLECTIONS = [
   "payments",
   "documents",
   "templates",
+  "prospects",
+  "prospectImports",
 ] as const;
 
 let clientUidCounter = 0;
@@ -2307,6 +2317,52 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
     await refreshState();
   }, [refreshState]);
 
+  const applyProspectingState = useCallback(
+    (payload: {
+      prospects?: Prospect[];
+      prospectImports?: ProspectImport[];
+    }) => {
+      setDb((prev) => {
+        const next: AgencyDatabaseState = {
+          ...prev,
+          ...(payload.prospects !== undefined
+            ? {
+                prospects: payload.prospects.filter(
+                  (p) => !deletedIdsRef.current.has(p.id)
+                ),
+              }
+            : {}),
+          ...(payload.prospectImports !== undefined
+            ? {
+                prospectImports: payload.prospectImports.filter(
+                  (imp) => !deletedIdsRef.current.has(imp.id)
+                ),
+              }
+            : {}),
+        };
+        dbRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
+
+  const markProspectsDeleted = useCallback(
+    (ids: string[]) => {
+      markIdsDeleted(ids);
+      const idSet = new Set(ids);
+      setDb((prev) => {
+        const next: AgencyDatabaseState = {
+          ...prev,
+          prospects: (prev.prospects || []).filter((p) => !idSet.has(p.id)),
+        };
+        dbRef.current = next;
+        return next;
+      });
+    },
+    [markIdsDeleted]
+  );
+
   const value = useMemo<AgencyContextValue>(
     () => ({
       db,
@@ -2385,6 +2441,8 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       markAllNotificationsRead,
       updateSettings,
       purgeDemoRecords,
+      applyProspectingState,
+      markProspectsDeleted,
     }),
     [
       db,
@@ -2459,6 +2517,8 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       markAllNotificationsRead,
       updateSettings,
       purgeDemoRecords,
+      applyProspectingState,
+      markProspectsDeleted,
     ]
   );
 

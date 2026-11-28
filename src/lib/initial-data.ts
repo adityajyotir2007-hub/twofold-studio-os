@@ -70,7 +70,7 @@ export const INITIAL_AGENCY_DATA: AgencyDatabaseState = {
   finance: [],
   payments: [],
   documents: [],
-    templates: [
+  templates: [
     {
       id: "tpl-1",
       title: "Founder 90-Second UX & Conversion Teardown",
@@ -245,6 +245,8 @@ This Master Services Agreement ("Agreement") is entered into as of {{Date}} betw
   activityLog: [],
     integrations: DEFAULT_INTEGRATIONS,
   importHistory: [],
+  prospects: [],
+  prospectImports: [],
   settings: {
     agencyName: "Twofold Studio",
     tagline: "Digital Product, Brand & Web Engineering Studio",

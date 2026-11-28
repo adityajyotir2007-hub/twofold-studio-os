@@ -8,6 +8,7 @@ import { InteractiveLandingPage } from "@/components/InteractiveLandingPage";
 import { DashboardView } from "@/components/modules/DashboardView";
 import { LeadsCrmView } from "@/components/modules/LeadsCrmView";
 import { OutreachManagerView } from "@/components/modules/OutreachManagerView";
+import { ProspectingView } from "@/components/modules/ProspectingView";
 import { ColdCallsView } from "@/components/modules/ColdCallsView";
 import { ClientsView } from "@/components/modules/ClientsView";
 import { ProjectsView } from "@/components/modules/ProjectsView";
@@ -39,6 +40,7 @@ import {
   Moon,
   Phone,
   Plus,
+  Radar,
   Radio,
   Search,
   Send,
@@ -58,6 +60,7 @@ const NAV: {
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "leads", label: "Leads & CRM", icon: Users },
   { key: "outreach", label: "Outreach & Campaigns", icon: Send },
+  { key: "prospecting", label: "AI Prospecting", icon: Radar },
   { key: "calls", label: "Cold Calling", icon: Phone },
   { key: "clients", label: "Clients", icon: Briefcase },
   { key: "projects", label: "Projects", icon: FolderKanban },
@@ -371,6 +374,8 @@ export function AppShell() {
         return <LeadsCrmView />;
       case "outreach":
         return <OutreachManagerView />;
+      case "prospecting":
+        return <ProspectingView />;
       case "calls":
         return <ColdCallsView />;
       case "clients":

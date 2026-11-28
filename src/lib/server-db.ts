@@ -146,6 +146,8 @@ function upgradeStateSchema(raw: AgencyDatabaseState): AgencyDatabaseState {
     invitations: raw.invitations || [],
     integrations: mergedIntegrations,
     importHistory: raw.importHistory || [],
+    prospects: raw.prospects || [],
+    prospectImports: raw.prospectImports || [],
     settings: {
       ...INITIAL_AGENCY_DATA.settings,
       ...(raw.settings || {}),

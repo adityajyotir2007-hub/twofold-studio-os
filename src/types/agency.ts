@@ -1,7 +1,10 @@
+import { Prospect, ProspectImport } from "./prospecting";
+
 export type NavigationSection =
   | "dashboard"
   | "leads"
   | "outreach"
+  | "prospecting"
   | "calls"
   | "clients"
   | "projects"
@@ -601,5 +604,7 @@ export interface AgencyDatabaseState {
   activityLog: ActivityLogItem[];
   integrations?: IntegrationConnection[];
   importHistory?: ImportJobRecord[];
+  prospects?: Prospect[];
+  prospectImports?: ProspectImport[];
   settings: AgencySettings;
 }
