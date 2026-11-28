@@ -59,6 +59,8 @@ import {
   LayoutGrid,
   Linkedin,
   Loader2,
+  LogIn,
+  LogOut,
   Mail,
   MessageCircle,
   Paperclip,
@@ -76,6 +78,7 @@ import {
 
 interface ProspectingViewProps {
   onOpenCrm?: () => void;
+  onOpenLogin?: () => void;
 }
 
 interface StagedSpreadsheetAttachment {
@@ -104,10 +107,15 @@ const QUICK_SUGGESTIONS: string[] = [
   "Research my uploaded prospects.",
 ];
 
-export function ProspectingView({ onOpenCrm }: ProspectingViewProps) {
+export function ProspectingView({
+  onOpenCrm,
+  onOpenLogin,
+}: ProspectingViewProps) {
   const {
     db,
+    isAuthenticated,
     currentUser,
+    logout,
     applyProspectingState,
     markProspectsDeleted,
     refreshState,
@@ -203,6 +211,11 @@ export function ProspectingView({ onOpenCrm }: ProspectingViewProps) {
   );
 
   const loadData = useCallback(async () => {
+    if (!isAuthenticated) {
+      setLoading(false);
+      setLoadError(null);
+      return;
+    }
     setLoading(true);
     setLoadError(null);
     try {
@@ -220,7 +233,7 @@ export function ProspectingView({ onOpenCrm }: ProspectingViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [applyProspectingState]);
+  }, [applyProspectingState, isAuthenticated]);
 
   useEffect(() => {
     loadData();
@@ -306,6 +319,18 @@ export function ProspectingView({ onOpenCrm }: ProspectingViewProps) {
     const finalPrompt = (overridePrompt ?? prompt).trim();
     if (!finalPrompt && stagedFiles.length === 0) return;
     if (submittingTurn) return;
+
+    if (!isAuthenticated) {
+      if (onOpenLogin) {
+        onOpenLogin();
+      } else {
+        setToast({
+          type: "err",
+          text: "Please click Login in the top-right corner to start your outreach session.",
+        });
+      }
+      return;
+    }
 
     setSubmittingTurn(true);
     setToast(null);
@@ -847,113 +872,139 @@ export function ProspectingView({ onOpenCrm }: ProspectingViewProps) {
             <ArrowUpRight className="w-3.5 h-3.5 text-neutral-400" />
           </button>
 
-          {/* User Profile / Secondary Navigation Dropdown */}
-          <div className="relative">
+          {!isAuthenticated ? (
+            /* Login Button when visitor is not authenticated */
             <button
               type="button"
-              onClick={() => setProfileMenuOpen((v) => !v)}
-              className="inline-flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-full bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-xs transition"
+              onClick={() => {
+                if (onOpenLogin) onOpenLogin();
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold text-[#120e0a] bg-gradient-to-r from-[#f7e5c9] via-[#f0c48c] to-[#ee964b] hover:brightness-105 transition shadow-[0_6px_20px_-6px_rgba(240,180,110,0.6)]"
             >
-              <div className="w-7 h-7 rounded-full bg-[#f0c999]/20 border border-[#f0c999]/40 text-[#f7e5c9] flex items-center justify-center text-[11px] font-semibold">
-                {currentUser.avatarInitials || "TF"}
-              </div>
-              <span className="hidden md:inline font-medium text-neutral-200 max-w-[110px] truncate">
-                {currentUser.name}
-              </span>
-              <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Login</span>
             </button>
-
-            {profileMenuOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setProfileMenuOpen(false)}
-                />
-                <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-[#121218] border border-white/10 shadow-2xl py-2 z-50 text-xs">
-                  <div className="px-3.5 py-2 border-b border-white/[0.07]">
-                    <div className="font-semibold text-white truncate">
-                      {currentUser.name}
-                    </div>
-                    <div className="text-[11px] text-neutral-400 truncate">
-                      {currentUser.email} · {currentUser.role}
-                    </div>
-                  </div>
-
-                  <div className="py-1">
-                    {[
-                      {
-                        key: "campaigns" as const,
-                        label: "Campaign history",
-                        icon: History,
-                        badge: conversations.length,
-                      },
-                      {
-                        key: "prospects" as const,
-                        label: "Prospect history",
-                        icon: Users,
-                        badge: prospects.length,
-                      },
-                      {
-                        key: "integrations" as const,
-                        label: "Integrations",
-                        icon: Plug,
-                      },
-                      {
-                        key: "settings" as const,
-                        label: "Settings",
-                        icon: Settings,
-                      },
-                      {
-                        key: "usage" as const,
-                        label: "Usage and billing",
-                        icon: CreditCard,
-                      },
-                    ].map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <button
-                          key={item.key}
-                          type="button"
-                          onClick={() => {
-                            setSecondaryDrawer(item.key);
-                            setProfileMenuOpen(false);
-                          }}
-                          className="w-full px-3.5 py-2 flex items-center justify-between text-neutral-300 hover:text-white hover:bg-white/[0.06] transition"
-                        >
-                          <span className="flex items-center gap-2.5">
-                            <Icon className="w-3.5 h-3.5 text-[#f0c999]" />
-                            <span>{item.label}</span>
-                          </span>
-                          {typeof item.badge === "number" && (
-                            <span className="px-1.5 py-0.2 rounded-full bg-white/[0.07] text-[10px] text-neutral-300 tabular-nums">
-                              {item.badge}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="pt-1 mt-1 border-t border-white/[0.07]">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileMenuOpen(false);
-                        navigateToCrm();
-                      }}
-                      className="w-full px-3.5 py-2 flex items-center justify-between text-[#f7e5c9] hover:bg-white/[0.06] font-medium transition"
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <LayoutGrid className="w-3.5 h-3.5" />
-                        <span>Open CRM Workspace</span>
-                      </span>
-                      <ArrowUpRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+          ) : (
+            /* User Profile / Secondary Navigation Dropdown when authenticated */
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setProfileMenuOpen((v) => !v)}
+                className="inline-flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-full bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-xs transition"
+              >
+                <div className="w-7 h-7 rounded-full bg-[#f0c999]/20 border border-[#f0c999]/40 text-[#f7e5c9] flex items-center justify-center text-[11px] font-semibold">
+                  {currentUser.avatarInitials || "TF"}
                 </div>
-              </>
-            )}
-          </div>
+                <span className="hidden md:inline font-medium text-neutral-200 max-w-[110px] truncate">
+                  {currentUser.name}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
+              </button>
+
+              {profileMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setProfileMenuOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-60 rounded-2xl bg-[#121218] border border-white/10 shadow-2xl py-2 z-50 text-xs">
+                    <div className="px-3.5 py-2 border-b border-white/[0.07]">
+                      <div className="font-semibold text-white truncate">
+                        {currentUser.name}
+                      </div>
+                      <div className="text-[11px] text-neutral-400 truncate">
+                        {currentUser.email} · {currentUser.role}
+                      </div>
+                    </div>
+
+                    <div className="py-1">
+                      {[
+                        {
+                          key: "campaigns" as const,
+                          label: "Campaign history",
+                          icon: History,
+                          badge: conversations.length,
+                        },
+                        {
+                          key: "prospects" as const,
+                          label: "Prospect history",
+                          icon: Users,
+                          badge: prospects.length,
+                        },
+                        {
+                          key: "integrations" as const,
+                          label: "Integrations",
+                          icon: Plug,
+                        },
+                        {
+                          key: "settings" as const,
+                          label: "Settings",
+                          icon: Settings,
+                        },
+                        {
+                          key: "usage" as const,
+                          label: "Usage and billing",
+                          icon: CreditCard,
+                        },
+                      ].map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => {
+                              setSecondaryDrawer(item.key);
+                              setProfileMenuOpen(false);
+                            }}
+                            className="w-full px-3.5 py-2 flex items-center justify-between text-neutral-300 hover:text-white hover:bg-white/[0.06] transition"
+                          >
+                            <span className="flex items-center gap-2.5">
+                              <Icon className="w-3.5 h-3.5 text-[#f0c999]" />
+                              <span>{item.label}</span>
+                            </span>
+                            {typeof item.badge === "number" && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-white/[0.07] text-[10px] text-neutral-300 tabular-nums">
+                                {item.badge}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="pt-1 mt-1 border-t border-white/[0.07] space-y-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          navigateToCrm();
+                        }}
+                        className="w-full px-3.5 py-2 flex items-center justify-between text-[#f7e5c9] hover:bg-white/[0.06] font-medium transition"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <LayoutGrid className="w-3.5 h-3.5" />
+                          <span>Open CRM Workspace</span>
+                        </span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          logout();
+                        }}
+                        className="w-full px-3.5 py-2 flex items-center gap-2.5 text-rose-400 hover:bg-white/[0.06] font-medium transition"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </header>
 

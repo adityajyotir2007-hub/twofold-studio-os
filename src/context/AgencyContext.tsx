@@ -569,7 +569,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
     useState<boolean>(false);
   const [sessionMember, setSessionMember] = useState<TeamMember | null>(null);
   const [activeSection, setActiveSection] =
-    useState<NavigationSection>("dashboard");
+    useState<NavigationSection>("prospecting");
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null

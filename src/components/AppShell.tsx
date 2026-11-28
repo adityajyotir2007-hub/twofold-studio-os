@@ -108,12 +108,23 @@ export function AppShell() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [previewLanding, setPreviewLanding] = useState(false);
+  const [showLoginScreen, setShowLoginScreen] = useState(false);
+  const [postLoginTarget, setPostLoginTarget] = useState<
+    "prospecting" | "crm"
+  >("prospecting");
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const prefs = db.settings.notificationPreferences;
+
+  useEffect(() => {
+    if (isAuthenticated && showLoginScreen) {
+      setShowLoginScreen(false);
+      setActiveSection(postLoginTarget === "crm" ? "dashboard" : "prospecting");
+    }
+  }, [isAuthenticated, showLoginScreen, postLoginTarget, setActiveSection]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -316,40 +327,76 @@ export function AppShell() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FAFAFA] dark:bg-neutral-950">
-        <div className="flex items-center gap-2 text-sm text-neutral-500">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading Twofold Studio
-          OS…
+      <div className="min-h-screen flex items-center justify-center bg-[#070709] text-neutral-100">
+        <div className="flex items-center gap-2 text-sm text-neutral-400">
+          <Loader2 className="w-4 h-4 animate-spin text-[#f0c999]" /> Loading
+          Twofold Studios…
         </div>
       </div>
     );
   }
 
-  if (!isAuthenticated || previewLanding) {
+  // Dedicated Login Page when user clicks "Login" or tries to open CRM while logged out
+  if (!isAuthenticated && (showLoginScreen || activeSection !== "prospecting")) {
     return (
       <div className="relative">
-        {isAuthenticated && previewLanding && (
-          <div className="fixed bottom-4 right-4 z-50">
-            <button
-              type="button"
-              onClick={() => setPreviewLanding(false)}
-              className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-lg hover:opacity-90 transition"
-            >
-              Return to Live Workspace →
-            </button>
-          </div>
-        )}
+        <div className="fixed top-4 left-4 z-50">
+          <button
+            type="button"
+            onClick={() => {
+              setShowLoginScreen(false);
+              setActiveSection("prospecting");
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 border border-neutral-200 dark:border-neutral-800 shadow-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 transition"
+          >
+            ← Back to Landing Page
+          </button>
+        </div>
+        <AuthScreen />
+      </div>
+    );
+  }
+
+  if (previewLanding) {
+    return (
+      <div className="relative">
+        <div className="fixed bottom-4 right-4 z-50">
+          <button
+            type="button"
+            onClick={() => setPreviewLanding(false)}
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-lg hover:opacity-90 transition"
+          >
+            Return to Live Workspace →
+          </button>
+        </div>
         <InteractiveLandingPage
-          onOpenSignIn={() => setPreviewLanding(false)}
+          onOpenSignIn={() => {
+            setPreviewLanding(false);
+            setShowLoginScreen(true);
+          }}
         />
       </div>
     );
   }
 
-  // Render AI Prospecting & Outreach System as a separate full-screen conversational product
+  // Main Landing Screen & Standalone Product: Conversational AI Outreach Agent
   if (activeSection === "prospecting") {
     return (
-      <ProspectingView onOpenCrm={() => setActiveSection("dashboard")} />
+      <ProspectingView
+        onOpenCrm={() => {
+          if (!isAuthenticated) {
+            setPostLoginTarget("crm");
+            setShowLoginScreen(true);
+            setActiveSection("dashboard");
+          } else {
+            setActiveSection("dashboard");
+          }
+        }}
+        onOpenLogin={() => {
+          setPostLoginTarget("prospecting");
+          setShowLoginScreen(true);
+        }}
+      />
     );
   }
 
