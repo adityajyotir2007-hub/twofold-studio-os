@@ -4,6 +4,8 @@ import {
   ProspectImport,
   ProspectInput,
   ProspectingCapabilities,
+  ProspectingChannelId,
+  ProspectingConversation,
   ProspectStatus,
   SendToCrmItemResult,
 } from "@/types/prospecting";
@@ -21,6 +23,7 @@ async function parseJsonOrThrow<T>(res: Response): Promise<T> {
 export async function fetchProspectingState(): Promise<{
   prospects: Prospect[];
   imports: ProspectImport[];
+  conversations: ProspectingConversation[];
   capabilities: ProspectingCapabilities;
 }> {
   const res = await fetch("/api/prospecting", {
@@ -40,9 +43,9 @@ export async function checkProspectDuplicates(
     credentials: "same-origin",
     body: JSON.stringify({ action: "check_duplicates", rows }),
   });
-  const data = await parseJsonOrThrow<{ duplicates: DuplicateCheckResultItem[] }>(
-    res
-  );
+  const data = await parseJsonOrThrow<{
+    duplicates: DuplicateCheckResultItem[];
+  }>(res);
   return data.duplicates;
 }
 
@@ -53,7 +56,11 @@ export async function importProspectsBatch(payload: {
   fileSize: number;
   duplicateStrategy: "skip" | "update";
   columnMapping: Record<string, string>;
-  rows: { rowNumber: number; included: boolean; data: Partial<ProspectInput> }[];
+  rows: {
+    rowNumber: number;
+    included: boolean;
+    data: Partial<ProspectInput>;
+  }[];
 }): Promise<{
   importRecord: ProspectImport;
   prospects: Prospect[];
@@ -64,6 +71,78 @@ export async function importProspectsBatch(payload: {
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
     body: JSON.stringify({ action: "import", ...payload }),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function submitProspectingChatTurn(payload: {
+  conversationId?: string;
+  prompt: string;
+  selectedChannels: ProspectingChannelId[];
+  files?: {
+    idempotencyKey?: string;
+    fileName: string;
+    fileType: "csv" | "xlsx" | "xls";
+    fileSize: number;
+    duplicateStrategy: "skip" | "update";
+    columnMapping: Record<string, string>;
+    rows: {
+      rowNumber: number;
+      included: boolean;
+      data: Partial<ProspectInput>;
+    }[];
+  }[];
+}): Promise<{
+  conversation: ProspectingConversation;
+  conversations: ProspectingConversation[];
+  prospects: Prospect[];
+  imports: ProspectImport[];
+}> {
+  const res = await fetch("/api/prospecting", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ action: "chat_turn", ...payload }),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function approveProspectingCampaign(payload: {
+  conversationId: string;
+  messageId: string;
+  followUpSchedule?: string;
+  editedDrafts?: {
+    prospectId: string;
+    subject: string;
+    body: string;
+    suppressed?: boolean;
+  }[];
+}): Promise<{
+  conversation: ProspectingConversation;
+  conversations: ProspectingConversation[];
+  prospects: Prospect[];
+}> {
+  const res = await fetch("/api/prospecting", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ action: "approve_campaign", ...payload }),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function cancelProspectingCampaign(payload: {
+  conversationId: string;
+  messageId: string;
+}): Promise<{
+  conversation: ProspectingConversation;
+  conversations: ProspectingConversation[];
+}> {
+  const res = await fetch("/api/prospecting", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ action: "cancel_campaign", ...payload }),
   });
   return parseJsonOrThrow(res);
 }

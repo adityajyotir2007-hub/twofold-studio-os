@@ -1,4 +1,8 @@
-import { Prospect, ProspectImport } from "./prospecting";
+import {
+  Prospect,
+  ProspectImport,
+  ProspectingConversation,
+} from "./prospecting";
 
 export type NavigationSection =
   | "dashboard"
@@ -607,5 +611,6 @@ export interface AgencyDatabaseState {
   importHistory?: ImportJobRecord[];
   prospects?: Prospect[];
   prospectImports?: ProspectImport[];
+  prospectConversations?: ProspectingConversation[];
   settings: AgencySettings;
 }

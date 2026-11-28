@@ -29,7 +29,11 @@ import {
   TeamMember,
   UserRole,
 } from "@/types/agency";
-import { Prospect, ProspectImport } from "@/types/prospecting";
+import {
+  Prospect,
+  ProspectImport,
+  ProspectingConversation,
+} from "@/types/prospecting";
 import { INITIAL_AGENCY_DATA } from "@/lib/initial-data";
 import {
   CONNECTED_CALL_OUTCOMES,
@@ -255,6 +259,7 @@ interface AgencyContextValue {
   applyProspectingState: (payload: {
     prospects?: Prospect[];
     prospectImports?: ProspectImport[];
+    prospectConversations?: ProspectingConversation[];
   }) => void;
   markProspectsDeleted: (ids: string[]) => void;
 }
@@ -288,6 +293,7 @@ const MERGEABLE_COLLECTIONS = [
   "templates",
   "prospects",
   "prospectImports",
+  "prospectConversations",
 ] as const;
 
 function countUserRecords(state?: Partial<AgencyDatabaseState> | null): number {
@@ -303,7 +309,8 @@ function countUserRecords(state?: Partial<AgencyDatabaseState> | null): number {
     (state.finance?.length || 0) +
     (state.documents?.length || 0) +
     (state.prospects?.length || 0) +
-    (state.prospectImports?.length || 0)
+    (state.prospectImports?.length || 0) +
+    (state.prospectConversations?.length || 0)
   );
 }
 
@@ -2452,10 +2459,12 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
     (payload: {
       prospects?: Prospect[];
       prospectImports?: ProspectImport[];
+      prospectConversations?: ProspectingConversation[];
     }) => {
       const vault = readLocalVaultSnapshot();
       let missingProspects: Prospect[] = [];
       let missingImports: ProspectImport[] = [];
+      let missingConvs: ProspectingConversation[] = [];
 
       setDb((prev) => {
         const mergeList = <T extends { id: string; updatedAtMs?: number }>(
@@ -2511,9 +2520,15 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           prev.prospectImports,
           vault?.prospectImports
         );
+        const mergedConvs = mergeList(
+          payload.prospectConversations,
+          prev.prospectConversations,
+          vault?.prospectConversations
+        );
 
         missingProspects = mergedProspects.missing;
         missingImports = mergedImports.missing;
+        missingConvs = mergedConvs.missing;
 
         const next: AgencyDatabaseState = {
           ...prev,
@@ -2523,13 +2538,20 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           ...(payload.prospectImports !== undefined
             ? { prospectImports: mergedImports.mergedList }
             : {}),
+          ...(payload.prospectConversations !== undefined
+            ? { prospectConversations: mergedConvs.mergedList }
+            : {}),
         };
         dbRef.current = next;
         writeLocalVaultSnapshot(next);
         return next;
       });
 
-      if (missingProspects.length > 0 || missingImports.length > 0) {
+      if (
+        missingProspects.length > 0 ||
+        missingImports.length > 0 ||
+        missingConvs.length > 0
+      ) {
         fetch("/api/transactions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2541,6 +2563,9 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
                 : {}),
               ...(missingImports.length > 0
                 ? { prospectImports: missingImports }
+                : {}),
+              ...(missingConvs.length > 0
+                ? { prospectConversations: missingConvs }
                 : {}),
             },
             deletedIds: Array.from(deletedIdsRef.current),

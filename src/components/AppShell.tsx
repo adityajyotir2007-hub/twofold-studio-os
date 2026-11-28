@@ -346,6 +346,13 @@ export function AppShell() {
     );
   }
 
+  // Render AI Prospecting & Outreach System as a separate full-screen conversational product
+  if (activeSection === "prospecting") {
+    return (
+      <ProspectingView onOpenCrm={() => setActiveSection("dashboard")} />
+    );
+  }
+
   const navItems = NAV.filter((n) => !n.perm || permissions[n.perm]);
 
   const renderSection = () => {
@@ -374,8 +381,6 @@ export function AppShell() {
         return <LeadsCrmView />;
       case "outreach":
         return <OutreachManagerView />;
-      case "prospecting":
-        return <ProspectingView />;
       case "calls":
         return <ColdCallsView />;
       case "clients":

@@ -13,6 +13,11 @@ import {
   sendProspectsToCrm,
   updateProspect,
 } from "@/lib/prospecting/server-store";
+import {
+  approveAndExecuteCampaign,
+  cancelCampaignApproval,
+  processConversationalTurn,
+} from "@/lib/prospecting/assistant-engine";
 import { PROSPECT_STATUSES } from "@/types/prospecting";
 
 export const dynamic = "force-dynamic";
@@ -107,6 +112,71 @@ const BulkDeleteSchema = z
   })
   .strip();
 
+const ChatTurnFileSchema = z
+  .object({
+    idempotencyKey: z.string().max(128).optional(),
+    fileName: z.string().min(1).max(255),
+    fileType: z.enum(["csv", "xlsx", "xls"]),
+    fileSize: z.number().int().min(1).max(5 * 1024 * 1024),
+    duplicateStrategy: z.enum(["skip", "update"]).default("skip"),
+    columnMapping: z.record(z.string(), z.string().max(200)).default({}),
+    rows: z
+      .array(
+        z
+          .object({
+            rowNumber: z.number().int().min(1),
+            included: z.boolean(),
+            data: ProspectInputFieldsSchema,
+          })
+          .strip()
+      )
+      .min(1)
+      .max(getMaxImportRows()),
+  })
+  .strip();
+
+const ChatTurnSchema = z
+  .object({
+    action: z.literal("chat_turn"),
+    conversationId: z.string().max(128).optional(),
+    prompt: z.string().max(4000).default(""),
+    selectedChannels: z
+      .array(z.enum(["email", "whatsapp", "instagram", "linkedin"]))
+      .default(["email"]),
+    files: z.array(ChatTurnFileSchema).max(5).optional(),
+  })
+  .strip();
+
+const ApproveCampaignSchema = z
+  .object({
+    action: z.literal("approve_campaign"),
+    conversationId: z.string().min(1).max(128),
+    messageId: z.string().min(1).max(128),
+    followUpSchedule: z.string().max(300).optional(),
+    editedDrafts: z
+      .array(
+        z
+          .object({
+            prospectId: z.string().min(1).max(128),
+            subject: z.string().max(500),
+            body: z.string().max(5000),
+            suppressed: z.boolean().optional(),
+          })
+          .strip()
+      )
+      .max(2000)
+      .optional(),
+  })
+  .strip();
+
+const CancelCampaignSchema = z
+  .object({
+    action: z.literal("cancel_campaign"),
+    conversationId: z.string().min(1).max(128),
+    messageId: z.string().min(1).max(128),
+  })
+  .strip();
+
 const PatchSchema = z
   .object({
     id: z.string().min(1).max(128),
@@ -141,9 +211,16 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { prospects, imports } = listProspecting(session.workspaceId);
+    const { prospects, imports, conversations } = listProspecting(
+      session.workspaceId
+    );
     const capabilities = getCapabilities();
-    return NextResponse.json({ prospects, imports, capabilities });
+    return NextResponse.json({
+      prospects,
+      imports,
+      conversations,
+      capabilities,
+    });
   } catch (err) {
     return NextResponse.json(
       {
@@ -295,6 +372,62 @@ export async function POST(req: NextRequest) {
         parsed.data.ids
       );
       return NextResponse.json(resData);
+    }
+
+    if (action === "chat_turn") {
+      const parsed = ChatTurnSchema.safeParse(body);
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            error:
+              parsed.error.issues[0]?.message ||
+              "Invalid conversational request.",
+          },
+          { status: 400 }
+        );
+      }
+      const result = await processConversationalTurn(
+        session.workspaceId,
+        actor,
+        parsed.data
+      );
+      return NextResponse.json(result);
+    }
+
+    if (action === "approve_campaign") {
+      const parsed = ApproveCampaignSchema.safeParse(body);
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            error:
+              parsed.error.issues[0]?.message ||
+              "Invalid campaign approval payload.",
+          },
+          { status: 400 }
+        );
+      }
+      const result = await approveAndExecuteCampaign(
+        session.workspaceId,
+        actor,
+        parsed.data
+      );
+      return NextResponse.json(result);
+    }
+
+    if (action === "cancel_campaign") {
+      const parsed = CancelCampaignSchema.safeParse(body);
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            error:
+              parsed.error.issues[0]?.message ||
+              "Invalid campaign cancel payload.",
+          },
+          { status: 400 }
+        );
+      }
+      const result = cancelCampaignApproval(session.workspaceId, parsed.data);
+      return NextResponse.json(result);
     }
 
     return NextResponse.json(

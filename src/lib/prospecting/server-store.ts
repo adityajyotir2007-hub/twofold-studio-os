@@ -22,6 +22,7 @@ import {
   ProspectImportRowResult,
   ProspectInput,
   ProspectingCapabilities,
+  ProspectingConversation,
   ProspectStatus,
   SendToCrmItemResult,
 } from "@/types/prospecting";
@@ -48,6 +49,15 @@ export function getCapabilities(): ProspectingCapabilities {
   const gmailConnected =
     (db.integrations || []).find((i) => i.provider === "gmail")?.status ===
     "connected";
+  const whatsappConnected =
+    (db.integrations || []).find((i) => i.provider === "whatsapp")?.status ===
+    "connected" ||
+    Boolean(
+      process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID
+    );
+  const instagramConnected =
+    (db.integrations || []).find((i) => i.provider === "instagram")?.status ===
+    "connected" || Boolean(process.env.INSTAGRAM_ACCESS_TOKEN);
   const gcalConnected =
     (db.integrations || []).find((i) => i.provider === "google_calendar")
       ?.status === "connected";
@@ -61,6 +71,8 @@ export function getCapabilities(): ProspectingCapabilities {
         process.env.N8N_WEBHOOK_SECRET?.trim()
     ),
     gmail: gmailConnected,
+    whatsapp: whatsappConnected,
+    instagram: instagramConnected,
     googleCalendar: gcalConnected,
     enrichmentProviders: [],
     maxImportRows: getMaxImportRows(),
@@ -71,6 +83,7 @@ export function getCapabilities(): ProspectingCapabilities {
 export function listProspecting(workspaceId: string): {
   prospects: Prospect[];
   imports: ProspectImport[];
+  conversations: ProspectingConversation[];
 } {
   const db = readAgencyDb();
   const prospects = (db.prospects || []).filter(
@@ -79,7 +92,10 @@ export function listProspecting(workspaceId: string): {
   const imports = (db.prospectImports || []).filter(
     (imp) => imp.workspaceId === workspaceId
   );
-  return { prospects, imports };
+  const conversations = (db.prospectConversations || []).filter(
+    (c) => c.workspaceId === workspaceId
+  );
+  return { prospects, imports, conversations };
 }
 
 function leadDedupeKeys(lead: Lead): string[] {

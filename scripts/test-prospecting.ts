@@ -9,6 +9,10 @@ import {
   sendProspectsToCrm,
 } from "../src/lib/prospecting/server-store";
 import {
+  approveAndExecuteCampaign,
+  processConversationalTurn,
+} from "../src/lib/prospecting/assistant-engine";
+import {
   prospectDedupeKeys,
   validateProspectRow,
 } from "../src/lib/prospecting/validate";
@@ -180,6 +184,73 @@ async function runTests() {
     assert.equal(crm2.results[0].outcome, "already_linked");
     console.log(
       "PASS: server-store runImport, idempotency, and sendProspectsToCrm (created -> already_linked)"
+    );
+
+    // 9. Conversational turn + Campaign Approval workflow
+    const chatRes = await processConversationalTurn(
+      DEFAULT_CRM_WORKSPACE,
+      actor,
+      {
+        prompt:
+          "Start outreach for my cafe leads in Toronto. I want to offer them website development.",
+        selectedChannels: ["email"],
+        files: [
+          {
+            fileName: "toronto-cafes.csv",
+            fileType: "csv",
+            fileSize: 320,
+            duplicateStrategy: "skip",
+            columnMapping: {
+              businessName: "Business",
+              email: "Email",
+              category: "Category",
+              location: "City",
+            },
+            rows: [
+              {
+                rowNumber: 1,
+                included: true,
+                data: {
+                  businessName: "Roast & Bloom Cafe",
+                  contactPerson: "Maya",
+                  email: "maya@roastbloom.example",
+                  category: "Cafe",
+                  location: "Toronto",
+                },
+              },
+            ],
+          },
+        ],
+      }
+    );
+
+    assert.equal(chatRes.conversation.messages.length, 2);
+    const assistantTurn = chatRes.conversation.messages[1];
+    assert.ok(assistantTurn.campaignApproval);
+    assert.equal(assistantTurn.campaignApproval?.status, "pending_approval");
+    assert.ok((assistantTurn.progressMetrics?.emailsPrepared || 0) >= 1);
+
+    const approveRes = await approveAndExecuteCampaign(
+      DEFAULT_CRM_WORKSPACE,
+      actor,
+      {
+        conversationId: chatRes.conversation.id,
+        messageId: assistantTurn.id,
+      }
+    );
+    const approvedMsg = approveRes.conversation.messages.find(
+      (m) => m.id === assistantTurn.id
+    );
+    assert.equal(
+      approvedMsg?.campaignApproval?.status,
+      "approved_executed"
+    );
+    assert.ok(
+      (approvedMsg?.campaignApproval?.executionSummary?.syncedToCrmCount ||
+        0) >= 1
+    );
+    console.log(
+      "PASS: conversational AI turn, draft generation, and campaign approval -> CRM sync"
     );
   } finally {
     if (originalDb !== null) {

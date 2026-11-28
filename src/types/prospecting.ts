@@ -59,6 +59,12 @@ export type QualificationStatus =
   | "not_interested"
   | "converted";
 
+export type ProspectingChannelId =
+  | "email"
+  | "whatsapp"
+  | "instagram"
+  | "linkedin";
+
 export interface ProspectInput {
   businessName: string;
   contactPerson: string;
@@ -87,6 +93,8 @@ export interface Prospect extends ProspectInput {
   campaignId: string | null;
   crmLeadId: string | null;
   validationWarnings: string[];
+  researchSummary?: string;
+  opportunityNote?: string;
   createdById: string;
   createdAt: string;
   updatedAt: string;
@@ -137,6 +145,8 @@ export interface ProspectingCapabilities {
   gemini: boolean;
   n8n: boolean;
   gmail: boolean;
+  whatsapp: boolean;
+  instagram: boolean;
   googleCalendar: boolean;
   enrichmentProviders: string[];
   maxImportRows: number;
@@ -156,10 +166,105 @@ export interface DuplicateCheckResultItem {
 
 export interface SendToCrmItemResult {
   prospectId: string;
-  outcome: "created" | "linked_existing" | "already_linked" | "not_found" | "error";
+  outcome:
+    | "created"
+    | "linked_existing"
+    | "already_linked"
+    | "not_found"
+    | "error";
   crmLeadId?: string;
   label?: string;
   reason?: string;
+}
+
+export interface ConversationProgressMetrics {
+  prospectsImported: number;
+  prospectsResearched: number;
+  contactDetailsFound: number;
+  emailsPrepared: number;
+  emailsAwaitingApproval: number;
+}
+
+export interface CampaignDraftMessage {
+  prospectId: string;
+  businessName: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
+  instagram: string;
+  website: string;
+  category: string;
+  location: string;
+  channel: ProspectingChannelId;
+  subject: string;
+  body: string;
+  researchNote: string;
+  suppressed: boolean;
+  suppressionReason?: string;
+}
+
+export interface CampaignApprovalPayload {
+  id: string;
+  title: string;
+  goalSummary: string;
+  targetFilterSummary: string;
+  selectedChannels: ProspectingChannelId[];
+  followUpSchedule: string;
+  totalSelected: number;
+  availableEmails: number;
+  availablePhones: number;
+  availableInstagrams: number;
+  suppressedCount: number;
+  status: "pending_approval" | "approved_executed" | "cancelled";
+  drafts: CampaignDraftMessage[];
+  executionSummary?: {
+    executedAt: string;
+    sentViaApiCount: number;
+    savedOutreachCount: number;
+    syncedToCrmCount: number;
+    n8nTriggered: boolean;
+    providerNote: string;
+  };
+}
+
+export interface ProspectingStatusStep {
+  label: string;
+  state: "done" | "active" | "pending" | "warning";
+  detail?: string;
+}
+
+export interface AttachedSheetSummary {
+  fileName: string;
+  fileType: "csv" | "xlsx" | "xls";
+  totalRows: number;
+  importedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+}
+
+export interface ProspectingChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  attachedFiles?: AttachedSheetSummary[];
+  selectedChannels?: ProspectingChannelId[];
+  statusSteps?: ProspectingStatusStep[];
+  progressMetrics?: ConversationProgressMetrics;
+  campaignApproval?: CampaignApprovalPayload;
+  referencedProspectIds?: string[];
+}
+
+export interface ProspectingConversation {
+  id: string;
+  workspaceId: string;
+  title: string;
+  createdById: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedAtMs: number;
+  messages: ProspectingChatMessage[];
 }
 
 export type ProspectingSectionTab =

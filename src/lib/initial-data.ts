@@ -247,6 +247,7 @@ This Master Services Agreement ("Agreement") is entered into as of {{Date}} betw
   importHistory: [],
   prospects: [],
   prospectImports: [],
+  prospectConversations: [],
   settings: {
     agencyName: "Twofold Studio",
     tagline: "Digital Product, Brand & Web Engineering Studio",

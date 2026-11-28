@@ -790,7 +790,11 @@ export async function POST(req: NextRequest) {
       // Workspace-scoped rehydration for AI Prospecting collections
       if (session) {
         const wsId = session.workspaceId;
-        for (const pKey of ["prospects", "prospectImports"] as const) {
+        for (const pKey of [
+          "prospects",
+          "prospectImports",
+          "prospectConversations",
+        ] as const) {
           const incomingForWs = (
             (body.collections?.[pKey] || []) as {
               id: string;

@@ -148,6 +148,7 @@ function upgradeStateSchema(raw: AgencyDatabaseState): AgencyDatabaseState {
     importHistory: raw.importHistory || [],
     prospects: raw.prospects || [],
     prospectImports: raw.prospectImports || [],
+    prospectConversations: raw.prospectConversations || [],
     settings: {
       ...INITIAL_AGENCY_DATA.settings,
       ...(raw.settings || {}),
