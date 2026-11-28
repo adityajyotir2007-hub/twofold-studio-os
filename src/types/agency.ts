@@ -135,6 +135,7 @@ export interface Lead {
   whatsappOptIn?: boolean;
   whatsappOptInAt?: string;
   instagramHandle?: string;
+  updatedAtMs?: number;
   isDemo?: boolean;
   legacyId?: string;
 }

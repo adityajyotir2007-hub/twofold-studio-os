@@ -271,6 +271,7 @@ function todayDate(): string {
 }
 
 const LOCAL_CACHE_KEY = "twofold_workspace_cache_v2";
+const LOCAL_BACKUP_KEY = "twofold_workspace_backup_v2";
 const LOCAL_DELETED_KEY = "twofold_deleted_ids_v2";
 
 const MERGEABLE_COLLECTIONS = [
@@ -288,6 +289,66 @@ const MERGEABLE_COLLECTIONS = [
   "prospects",
   "prospectImports",
 ] as const;
+
+function countUserRecords(state?: Partial<AgencyDatabaseState> | null): number {
+  if (!state) return 0;
+  return (
+    (state.leads?.length || 0) +
+    (state.outreach?.length || 0) +
+    (state.coldCalls?.length || 0) +
+    (state.campaigns?.length || 0) +
+    (state.clients?.length || 0) +
+    (state.projects?.length || 0) +
+    (state.tasks?.length || 0) +
+    (state.finance?.length || 0) +
+    (state.documents?.length || 0) +
+    (state.prospects?.length || 0) +
+    (state.prospectImports?.length || 0)
+  );
+}
+
+function readLocalVaultSnapshot(): AgencyDatabaseState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const rawPrimary = window.localStorage.getItem(LOCAL_CACHE_KEY);
+    const rawBackup = window.localStorage.getItem(LOCAL_BACKUP_KEY);
+    const primary = rawPrimary
+      ? (JSON.parse(rawPrimary) as AgencyDatabaseState)
+      : null;
+    const backup = rawBackup
+      ? (JSON.parse(rawBackup) as AgencyDatabaseState)
+      : null;
+
+    const primaryCount = countUserRecords(primary);
+    const backupCount = countUserRecords(backup);
+
+    if (primary && primaryCount >= backupCount) {
+      return primary;
+    }
+    if (backup && backupCount > 0) {
+      return backup;
+    }
+    return primary || backup;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalVaultSnapshot(
+  state: AgencyDatabaseState,
+  allowOverwriteBackup = false
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const serialized = JSON.stringify(state);
+    window.localStorage.setItem(LOCAL_CACHE_KEY, serialized);
+    if (countUserRecords(state) > 0 || allowOverwriteBackup) {
+      window.localStorage.setItem(LOCAL_BACKUP_KEY, serialized);
+    }
+  } catch {
+    // ignore storage quota errors
+  }
+}
 
 let clientUidCounter = 0;
 function createUniqueId(prefix: string): string {
@@ -364,6 +425,7 @@ function mergeServerAndLocalState(
   merged: AgencyDatabaseState;
   missingOnServer: Partial<Record<string, { id: string }[]>>;
 } {
+  const vault = readLocalVaultSnapshot();
   const merged: AgencyDatabaseState = { ...server };
   const missingOnServer: Partial<Record<string, { id: string }[]>> = {};
 
@@ -375,20 +437,40 @@ function mergeServerAndLocalState(
           ) as unknown as { id: string; updatedAtMs?: number }[])
         : ((server[key] as unknown as { id: string; updatedAtMs?: number }[]) ||
           []);
-    const rawLocalArr =
+    const inMemLocalArr =
       key === "outreach"
         ? (sanitizeOutreachCollection(
             local.outreach
           ) as unknown as { id: string; updatedAtMs?: number }[])
         : ((local[key] as unknown as { id: string; updatedAtMs?: number }[]) ||
           []);
+    const vaultLocalArr =
+      vault && Array.isArray(vault[key])
+        ? key === "outreach"
+          ? (sanitizeOutreachCollection(
+              vault.outreach
+            ) as unknown as { id: string; updatedAtMs?: number }[])
+          : ((vault[key] as unknown as { id: string; updatedAtMs?: number }[]) ||
+            [])
+        : [];
+
+    // Combine in-memory state + persisted localStorage vault (keeping newer updatedAtMs)
+    const combinedLocalMap = new Map<
+      string,
+      { id: string; updatedAtMs?: number }
+    >();
+    for (const item of [...vaultLocalArr, ...inMemLocalArr]) {
+      if (!item || !item.id || deletedIds.has(item.id)) continue;
+      const existing = combinedLocalMap.get(item.id);
+      if (!existing || (item.updatedAtMs || 0) >= (existing.updatedAtMs || 0)) {
+        combinedLocalMap.set(item.id, item);
+      }
+    }
 
     const serverArr = rawServerArr.filter(
       (item) => item && !deletedIds.has(item.id)
     );
-    const localArr = rawLocalArr.filter(
-      (item) => item && !deletedIds.has(item.id)
-    );
+    const localArr = Array.from(combinedLocalMap.values());
 
     const serverMap = new Map(serverArr.map((item) => [item.id, item]));
     const missing: { id: string }[] = [];
@@ -493,6 +575,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
   const dbRef = useRef<AgencyDatabaseState>(INITIAL_AGENCY_DATA);
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const hydratedCacheRef = useRef<boolean>(false);
+  const skipFirstPersistEffectRef = useRef<boolean>(true);
 
   const markIdsDeleted = useCallback((ids: string[]) => {
     for (const id of ids) {
@@ -518,21 +601,16 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           deletedIdsRef.current = new Set(parsedDel);
         }
       }
-      const rawCache = window.localStorage.getItem(LOCAL_CACHE_KEY);
-      if (rawCache) {
-        const cachedDb = JSON.parse(rawCache) as AgencyDatabaseState;
-        if (cachedDb && Array.isArray(cachedDb.leads)) {
-          dbRef.current = cachedDb;
-          setDb((prev) => {
-            const { merged } = mergeServerAndLocalState(
-              prev,
-              cachedDb,
-              deletedIdsRef.current
-            );
-            dbRef.current = merged;
-            return merged;
-          });
-        }
+      const cachedDb = readLocalVaultSnapshot();
+      if (cachedDb && Array.isArray(cachedDb.leads)) {
+        const { merged } = mergeServerAndLocalState(
+          dbRef.current,
+          cachedDb,
+          deletedIdsRef.current
+        );
+        dbRef.current = merged;
+        writeLocalVaultSnapshot(merged);
+        setDb(merged);
       }
     } catch {
       // ignore cache parse errors
@@ -541,15 +619,15 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Persist workspace state snapshot locally whenever db changes
+  // Persist workspace state snapshot locally whenever db changes (skipping initial mount pass before hydration state commits)
   useEffect(() => {
+    if (skipFirstPersistEffectRef.current) {
+      skipFirstPersistEffectRef.current = false;
+      return;
+    }
     dbRef.current = db;
     if (!hydratedCacheRef.current) return;
-    try {
-      window.localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(db));
-    } catch {
-      // ignore storage quota errors
-    }
+    writeLocalVaultSnapshot(db);
   }, [db]);
 
   const clearAutoOutreachResult = useCallback(() => {
@@ -571,6 +649,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
             );
             missingToSync = missingOnServer;
             dbRef.current = merged;
+            writeLocalVaultSnapshot(merged);
             return merged;
           });
 
@@ -737,17 +816,20 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
   // Helper for granular record API calls
   const apiCreateRecord = useCallback(
     async (collection: string, record: unknown, auditMeta?: unknown) => {
-      await fetch(
-        `/api/transactions?__collection=${encodeURIComponent(collection)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ record, auditMeta }),
-        }
-      );
-      await refreshState();
+      try {
+        await fetch(
+          `/api/transactions?__collection=${encodeURIComponent(collection)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ record, auditMeta }),
+          }
+        );
+      } catch {
+        // local vault preserves record if offline
+      }
     },
-    [refreshState]
+    []
   );
 
   const apiUpdateRecord = useCallback(
@@ -1212,6 +1294,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           ? []
           : autoOutreach?.channels ?? detectedChannels;
 
+      const nowMs = Date.now();
       const newLead: Lead = {
         ...leadInput,
         instagramUrl: normalizedInstagramUrl,
@@ -1225,19 +1308,25 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           channelsToSend.length > 0
             ? todayDate()
             : leadInput.lastContacted || "",
-        id: `lead-${Date.now()}`,
+        id: createUniqueId("lead"),
         internalNotes: [],
         history: [
           {
-            id: `lh-${Date.now()}`,
+            id: createUniqueId("lh"),
             action: `Lead created (${leadInput.leadSource})`,
             actorName: currentUser.name,
             timestamp: nowTimestamp(),
           },
         ],
+        updatedAtMs: nowMs,
         isDemo: false,
       };
-      setDb((prev) => ({ ...prev, leads: [newLead, ...prev.leads] }));
+      setDb((prev) => {
+        const next = { ...prev, leads: [newLead, ...prev.leads] };
+        dbRef.current = next;
+        writeLocalVaultSnapshot(next);
+        return next;
+      });
       apiCreateRecord("leads", newLead, {
         entityType: "Lead",
         entityName: newLead.businessName,
@@ -1324,24 +1413,42 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           : existing.history
         : undefined;
 
-      const finalUpdates = nextHistory
-        ? { ...patchedUpdates, history: nextHistory }
-        : patchedUpdates;
+      const nowMs = Date.now();
+      const finalUpdates: Partial<Lead> = {
+        ...(nextHistory
+          ? { ...patchedUpdates, history: nextHistory }
+          : patchedUpdates),
+        updatedAtMs: nowMs,
+      };
+      const fallbackLead = existing
+        ? ({ ...existing, ...finalUpdates, id } as Lead)
+        : undefined;
 
-      setDb((prev) => ({
-        ...prev,
-        leads: prev.leads.map((l) =>
-          l.id === id ? { ...l, ...finalUpdates } : l
-        ),
-      }));
+      setDb((prev) => {
+        const next = {
+          ...prev,
+          leads: prev.leads.map((l) =>
+            l.id === id ? { ...l, ...finalUpdates } : l
+          ),
+        };
+        dbRef.current = next;
+        writeLocalVaultSnapshot(next);
+        return next;
+      });
 
-      apiUpdateRecord("leads", id, finalUpdates, {
-        entityType: "Lead",
-        entityName: existing?.businessName || id,
-        details: statusChanged
-          ? `Updated lead status to ${patchedUpdates.status}.`
-          : `Updated lead profile.`,
-      }).then(() => {
+      apiUpdateRecord(
+        "leads",
+        id,
+        finalUpdates,
+        {
+          entityType: "Lead",
+          entityName: existing?.businessName || id,
+          details: statusChanged
+            ? `Updated lead status to ${patchedUpdates.status}.`
+            : `Updated lead profile.`,
+        },
+        fallbackLead
+      ).then(() => {
         if (channelsToSend.length > 0) {
           sendLeadPersonalizedOutreach({
             leadId: id,
@@ -1362,37 +1469,61 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
 
   const deleteLead = useCallback(
     (id: string) => {
-      setDb((prev) => ({
-        ...prev,
-        leads: prev.leads.filter((l) => l.id !== id),
-      }));
+      markIdsDeleted([id]);
+      setDb((prev) => {
+        const next = {
+          ...prev,
+          leads: prev.leads.filter((l) => l.id !== id),
+        };
+        dbRef.current = next;
+        writeLocalVaultSnapshot(next, true);
+        return next;
+      });
       apiDeleteRecord("leads", id);
     },
-    [apiDeleteRecord]
+    [apiDeleteRecord, markIdsDeleted]
   );
 
   const bulkUpdateLeads = useCallback(
     (ids: string[], updates: Partial<Lead>) => {
+      const idSet = new Set(ids);
+      const nowMs = Date.now();
+      setDb((prev) => {
+        const next = {
+          ...prev,
+          leads: prev.leads.map((l) =>
+            idSet.has(l.id) ? { ...l, ...updates, updatedAtMs: nowMs } : l
+          ),
+        };
+        dbRef.current = next;
+        writeLocalVaultSnapshot(next);
+        return next;
+      });
       fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "bulk_leads_update",
           ids,
-          updates,
+          updates: { ...updates, updatedAtMs: nowMs },
         }),
-      }).then(() => refreshState());
+      }).catch(() => {});
     },
-    [refreshState]
+    []
   );
 
   const bulkDeleteLeads = useCallback(
     (ids: string[]) => {
       markIdsDeleted(ids);
-      setDb((prev) => ({
-        ...prev,
-        leads: prev.leads.filter((l) => !ids.includes(l.id)),
-      }));
+      setDb((prev) => {
+        const next = {
+          ...prev,
+          leads: prev.leads.filter((l) => !ids.includes(l.id)),
+        };
+        dbRef.current = next;
+        writeLocalVaultSnapshot(next, true);
+        return next;
+      });
       fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2322,27 +2453,100 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
       prospects?: Prospect[];
       prospectImports?: ProspectImport[];
     }) => {
+      const vault = readLocalVaultSnapshot();
+      let missingProspects: Prospect[] = [];
+      let missingImports: ProspectImport[] = [];
+
       setDb((prev) => {
+        const mergeList = <T extends { id: string; updatedAtMs?: number }>(
+          incoming: T[] | undefined,
+          current: T[] | undefined,
+          vaultArr: T[] | undefined
+        ): { mergedList: T[]; missing: T[] } => {
+          if (incoming === undefined) {
+            return { mergedList: current || [], missing: [] };
+          }
+          const serverFiltered = incoming.filter(
+            (item) => item && !deletedIdsRef.current.has(item.id)
+          );
+          const serverMap = new Map(
+            serverFiltered.map((item) => [item.id, item])
+          );
+          const localCombined = new Map<string, T>();
+          for (const item of [...(vaultArr || []), ...(current || [])]) {
+            if (!item || !item.id || deletedIdsRef.current.has(item.id)) {
+              continue;
+            }
+            const ex = localCombined.get(item.id);
+            if (!ex || (item.updatedAtMs || 0) >= (ex.updatedAtMs || 0)) {
+              localCombined.set(item.id, item);
+            }
+          }
+
+          const missingLocal: T[] = [];
+          const toSync: T[] = [];
+          for (const loc of localCombined.values()) {
+            const srv = serverMap.get(loc.id);
+            if (!srv) {
+              missingLocal.push(loc);
+              toSync.push(loc);
+            } else if ((loc.updatedAtMs || 0) > (srv.updatedAtMs || 0)) {
+              serverMap.set(loc.id, loc);
+              toSync.push(loc);
+            }
+          }
+          return {
+            mergedList: [...missingLocal, ...Array.from(serverMap.values())],
+            missing: toSync,
+          };
+        };
+
+        const mergedProspects = mergeList(
+          payload.prospects,
+          prev.prospects,
+          vault?.prospects
+        );
+        const mergedImports = mergeList(
+          payload.prospectImports,
+          prev.prospectImports,
+          vault?.prospectImports
+        );
+
+        missingProspects = mergedProspects.missing;
+        missingImports = mergedImports.missing;
+
         const next: AgencyDatabaseState = {
           ...prev,
           ...(payload.prospects !== undefined
-            ? {
-                prospects: payload.prospects.filter(
-                  (p) => !deletedIdsRef.current.has(p.id)
-                ),
-              }
+            ? { prospects: mergedProspects.mergedList }
             : {}),
           ...(payload.prospectImports !== undefined
-            ? {
-                prospectImports: payload.prospectImports.filter(
-                  (imp) => !deletedIdsRef.current.has(imp.id)
-                ),
-              }
+            ? { prospectImports: mergedImports.mergedList }
             : {}),
         };
         dbRef.current = next;
+        writeLocalVaultSnapshot(next);
         return next;
       });
+
+      if (missingProspects.length > 0 || missingImports.length > 0) {
+        fetch("/api/transactions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "rehydrate_records",
+            collections: {
+              ...(missingProspects.length > 0
+                ? { prospects: missingProspects }
+                : {}),
+              ...(missingImports.length > 0
+                ? { prospectImports: missingImports }
+                : {}),
+            },
+            deletedIds: Array.from(deletedIdsRef.current),
+          }),
+        }).catch(() => {});
+      }
     },
     []
   );
@@ -2357,6 +2561,7 @@ export function AgencyProvider({ children }: { children: React.ReactNode }) {
           prospects: (prev.prospects || []).filter((p) => !idSet.has(p.id)),
         };
         dbRef.current = next;
+        writeLocalVaultSnapshot(next, true);
         return next;
       });
     },

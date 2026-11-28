@@ -261,7 +261,10 @@ export function createSessionToken(
   const payload = {
     memberId: member.id,
     email: member.email,
+    name: member.name,
     role: member.role,
+    title: member.title,
+    department: member.department,
     workspaceId,
     exp: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
   };
@@ -297,19 +300,56 @@ export function verifySessionToken(
     ) as {
       memberId: string;
       email: string;
+      name?: string;
       role: UserRole;
+      title?: string;
+      department?: string;
       workspaceId: string;
       exp: number;
     };
     if (Date.now() > parsed.exp) return null;
 
     const db = readAgencyDb();
-    const member = db.teamMembers.find(
+    let member = db.teamMembers.find(
       (m) =>
         m.id === parsed.memberId ||
         m.email.toLowerCase() === parsed.email.toLowerCase()
     );
-    if (!member || member.status === "Inactive") return null;
+    if (member && member.status === "Inactive") return null;
+
+    // If a valid HMAC-signed session hits a cold serverless container whose ephemeral /tmp
+    // does not yet have this authenticated member (e.g. Google sign-in), restore them.
+    if (!member && parsed.email) {
+      const displayName =
+        parsed.name ||
+        parsed.email.split("@")[0].replace(/^./, (c) => c.toUpperCase());
+      const initials =
+        displayName
+          .split(" ")
+          .map((w) => w[0])
+          .join("")
+          .toUpperCase()
+          .slice(0, 2) || "TF";
+      member = {
+        id: parsed.memberId || `tm-${Date.now()}`,
+        name: displayName,
+        email: parsed.email.toLowerCase(),
+        role: parsed.role || "Admin",
+        title: parsed.title || "Executive Director",
+        avatarInitials: initials,
+        phone: "+1 (415) 890-4421",
+        department: parsed.department || "Executive Leadership",
+        hourlyRate: 185,
+        status: "Active",
+        dailyTargets: { calls: 10, emails: 20, dms: 10, leadsAdded: 10 },
+        isDemo: false,
+        createdAt: new Date().toISOString().slice(0, 10),
+      };
+      db.teamMembers = [member, ...(db.teamMembers || [])];
+      writeAgencyDb(db);
+    }
+
+    if (!member) return null;
 
     return {
       member,
